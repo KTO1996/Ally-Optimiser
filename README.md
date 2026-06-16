@@ -99,6 +99,9 @@ controller: D-pad to move, A to select, LB/RB to switch tabs), and a first-run
   console (TDP over the model band, resolution above the 1080p panel, FPS > 120).
 - **Cover art** — auto-fetched for Steam games (cached); games without art get a
   generated grey gradient placeholder with the title. **List or grid** library.
+- **Auto-fill all** — one button to fetch cover art for the whole library and
+  suggest a starting profile (PCGamingWiki API) for any game without one. Runs in
+  the background, keeps your existing profiles, and labels suggestions untested.
 - **Import settings** — paste a PCGamingWiki/guide link or copied settings text
   in the Add/Edit dialog to fill TDP / resolution / FPS (with a clear warning
   before any non-API web fetch — see the no-scraping note below).

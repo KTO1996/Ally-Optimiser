@@ -273,6 +273,10 @@ class AllyOptimizerApp(ctk.CTk):
     def _page_games(self) -> None:
         self._header_title("Games")
         self._accent_button(self.header, "⟳ Scan", self._on_scan, width=90).pack(side="right")
+        ctk.CTkButton(self.header, text="✨ Auto-fill all", command=self._auto_fill_all,
+                      width=120, fg_color=("gray75", "gray30"),
+                      hover_color=("gray65", "gray38"),
+                      text_color=("gray10", "gray90")).pack(side="right", padx=6)
         ctk.CTkButton(self.header, text="＋ Add game",
                       command=lambda: self._open_edit_form(), width=100,
                       fg_color=("gray75", "gray30"), hover_color=("gray65", "gray38"),
@@ -858,6 +862,79 @@ class AllyOptimizerApp(ctk.CTk):
         self.detected = {d.name: d for d in found}
         self._refresh_game_list()
         messagebox.showinfo("Scan complete", f"Detected {len(found)} installed game(s).")
+
+    def _auto_fill_all(self) -> None:
+        """Background pass over the library: fetch cover art for everything and
+        suggest a PCGamingWiki profile for games that don't have one yet.
+
+        Skips games you've already customised (keeps their profiles), only adds
+        a suggested profile where none exists, and never overwrites saved art.
+        """
+        if getattr(self, "_autofill_running", False):
+            return
+        names = [self._entry_to_name(e) for e in self._all_entries()]
+        if not names:
+            messagebox.showinfo("Auto-fill", "No games yet — Scan or Add a game first.")
+            return
+        if not messagebox.askyesno(
+            "Auto-fill all",
+            f"Fetch cover art for {len(names)} game(s) and suggest a starting "
+            "profile for any without one?\n\nSuggestions come from the public "
+            "PCGamingWiki API and are labelled untested. Existing profiles are "
+            "kept."):
+            return
+        self._autofill_running = True
+
+        def work():
+            suggested = covered = 0
+            for i, name in enumerate(names, 1):
+                self.after(0, lambda i=i, n=name:
+                           self.applied_var.set(f"Auto-filling {i}/{len(names)}: {n}…"))
+                game = prof.find_game(self.games_doc, name)
+                det = self.detected.get(name)
+                # 1) Suggest a profile if there isn't one.
+                if not (game and game.get("profiles")):
+                    try:
+                        sugg = pcgamingwiki.suggest_profile(name, self.config_data)
+                    except Exception:
+                        sugg = None
+                    if sugg:
+                        proc = (det.process_name if det else None) or \
+                               (game or {}).get("process_name", "")
+                        prof.upsert_game(self.games_doc, name, proc, [sugg],
+                                         source="PCGamingWiki (algorithmic suggestion)")
+                        game = prof.find_game(self.games_doc, name)
+                        suggested += 1
+                # 2) Fetch + persist cover art (Steam appid or a saved cover URL).
+                appid = det.appid if det else None
+                try:
+                    path = covers.resolve_cover(game, appid, allow_network=True)
+                except Exception:
+                    path = None
+                if path and game is not None and game.get("cover") != path:
+                    prof.upsert_game(self.games_doc, name,
+                                     game.get("process_name", ""),
+                                     game.get("profiles", []),
+                                     source=game.get("source", "manual entry"),
+                                     cover=path)
+                    covered += 1
+            try:
+                prof.save_games(self.games_doc)
+            except Exception:
+                pass
+            self.after(0, lambda: self._auto_fill_done(suggested, covered))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _auto_fill_done(self, suggested: int, covered: int) -> None:
+        self._autofill_running = False
+        self.applied_var.set(f"Auto-fill done — {suggested} suggested, {covered} covers.")
+        if self.active_page == "Games":
+            self._show_page("Games")
+        messagebox.showinfo("Auto-fill complete",
+                            f"Suggested {suggested} profile(s) and fetched "
+                            f"{covered} cover(s).\n\nSuggestions are untested "
+                            "starting points — tweak them per game.")
 
     def _suggest(self, name: str) -> None:
         self.configure(cursor="watch")
