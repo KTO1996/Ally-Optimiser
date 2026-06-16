@@ -6,14 +6,5 @@
   "extra_library_paths": [],
   "battery_default_tdp": 12,
   "plugged_default_tdp": 25,
-  "rogallylife_base_url": "https://rogallylife.com/?s=",
-  "reapply_hotkey": "ctrl+alt+a",
-  "last_applied": null,
-  "minimize_to_tray": true,
-  "enable_hotkey": true,
-  "enable_pcgamingwiki": true,
-  "theme": "light",
-  "device_override": null,
-  "min_tdp": 5,
-  "max_tdp": 40
+  "rogallylife_base_url": "https://rogallylife.com/?s="
 }
