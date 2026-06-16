@@ -21,6 +21,12 @@ from app import boost  # noqa: E402
 from app import hibernate  # noqa: E402
 from app import importer  # noqa: E402
 from app import covers  # noqa: E402
+from app import presets  # noqa: E402
+from app import batteryest  # noqa: E402
+from app import updates  # noqa: E402
+from app import backup  # noqa: E402
+from app import watcher  # noqa: E402
+from app import display  # noqa: E402
 from app.tweakengine import TweakEngine  # noqa: E402
 
 
@@ -242,6 +248,69 @@ def test_covers_steam_urls_and_cached():
     assert covers.is_url("https://example.com/a.jpg")
     assert covers.is_url(r"C:\art\cover.jpg") is False
     assert covers.cached_cover({"cover": "https://x/y.jpg"}) is None  # URL, not local
+
+
+def test_presets_scale_to_model():
+    base = {p["label"]: p for p in presets.presets_for(sysinfo.ALLY)}
+    x = {p["label"]: p for p in presets.presets_for(sysinfo.ALLY_X)}
+    assert set(base) == {"Silent", "Balanced", "Turbo", "Max"}
+    # Ally X has more headroom, so its Max sustained is higher.
+    assert x["Max"]["tdp_sustained"] > base["Max"]["tdp_sustained"]
+    # Presets should pass their own validator.
+    for p in presets.presets_for(sysinfo.ALLY_X):
+        assert sysinfo.validate_profile(p, sysinfo.ALLY_X) == []
+
+
+def test_battery_estimate():
+    ally = batteryest.estimate_hours(15, sysinfo.ALLY)
+    allyx = batteryest.estimate_hours(15, sysinfo.ALLY_X)
+    assert ally and allyx and allyx > ally          # bigger battery lasts longer
+    assert batteryest.estimate_hours(0, sysinfo.ALLY) is not None
+    assert "h battery" in batteryest.estimate_text({"tdp_sustained": 15}, sysinfo.ALLY)
+
+
+def test_updates_version_compare():
+    assert updates.is_newer("v1.3.0", "v1.2.0") is True
+    assert updates.is_newer("v1.2.0", "v1.2.0") is False
+    assert updates.is_newer("1.2.1", "v1.2.0") is True
+    assert updates.is_newer("v1.2.0", "v1.10.0") is False
+
+
+def test_backup_roundtrip(monkeypatch=None):
+    import tempfile
+    from app import backup as bk
+    with tempfile.TemporaryDirectory() as tmp:
+        prof_dir = os.path.join(tmp, "profiles")
+        os.makedirs(prof_dir)
+        for base, content in (("games.json", '{"games": {}}'),
+                              ("config.json", '{"theme": "dark"}')):
+            with open(os.path.join(prof_dir, base), "w") as fh:
+                fh.write(content)
+        # Point the module at our temp profiles dir.
+        bk.PROFILES_DIR = prof_dir
+        bk.GAMES_FILE = os.path.join(prof_dir, "games.json")
+        bk.CONFIG_FILE = os.path.join(prof_dir, "config.json")
+        zip_path = os.path.join(tmp, "backup.zip")
+        included = bk.export_config(zip_path)
+        assert "games.json" in included and "config.json" in included
+        os.remove(os.path.join(prof_dir, "games.json"))
+        restored = bk.import_config(zip_path)
+        assert "games.json" in restored
+        assert os.path.isfile(os.path.join(prof_dir, "games.json"))
+
+
+def test_watcher_match_process():
+    doc = {"games": {"Doom": {"process_name": "DOOMEternal.exe"}}}
+    pm = watcher.process_name_map(doc)
+    assert watcher.match_process("DOOMEternal.exe", pm) == "Doom"
+    assert watcher.match_process("doometernal.exe", pm) == "Doom"   # case-insensitive
+    assert watcher.match_process("explorer.exe", pm) is None
+
+
+def test_display_parse_resolution():
+    assert display.parse_resolution("1920x1080") == (1920, 1080)
+    assert display.parse_resolution("1280 x 720") == (1280, 720)
+    assert display.parse_resolution("nonsense") is None
 
 
 def _run_all():

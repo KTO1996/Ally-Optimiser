@@ -13,13 +13,29 @@ from PIL import ImageGrab  # noqa: E402
 
 from app import gui  # noqa: E402
 
-# Don't spawn tray/hotkey threads during rendering.
+# Don't spawn tray/hotkey threads or the first-run dialog during rendering.
 gui.AllyOptimizerApp._setup_tray = lambda self: None
 gui.AllyOptimizerApp._setup_hotkey = lambda self: None
+gui.AllyOptimizerApp._maybe_onboard = lambda self: None
 
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.path.join(ROOT, "assets")
 W, H = 1040, 680
 PAGES = list(gui.NAV_ITEMS)
+
+# Demo cover art (in-memory only — keeps the shipped games.json clean).
+_SAMPLE = {
+    "Forza Horizon 6": os.path.join(OUT, "sample_covers", "forza.jpg"),
+    "Left 4 Dead 2": os.path.join(OUT, "sample_covers", "l4d2.jpg"),
+    "Wo Long: Fallen Dynasty": os.path.join(OUT, "sample_covers", "wolong.jpg"),
+}
+
+
+def inject_sample_covers(app):
+    for gname, path in _SAMPLE.items():
+        g = app.games_doc.get("games", {}).get(gname)
+        if g and os.path.isfile(path):
+            g["cover"] = path
 
 
 def shot(app, path):
@@ -49,7 +65,14 @@ def capture_all(app, tag):
 def main():
     app = gui.AllyOptimizerApp()
     app.geometry(f"{W}x{H}+0+0")
+    inject_sample_covers(app)
     capture_all(app, app.theme_mode)
+
+    # Grid view of the library (dark).
+    app.library_view = "grid"
+    app._show_page("Games")
+    shot(app, os.path.join(OUT, f"screenshot_{app.theme_mode}_grid.png"))
+    app.library_view = "list"
 
     # Toggle to the other theme and recapture.
     app.theme_switch.select() if app.theme_mode == "dark" else app.theme_switch.deselect()

@@ -16,6 +16,9 @@
   "device_override": null,
   "anyfse_path": null,
   "auto_hibernate_minutes": 30,
+  "auto_apply": false,
+  "library_view": "list",
+  "seen_welcome": true,
   "min_tdp": 5,
   "max_tdp": 40
 }

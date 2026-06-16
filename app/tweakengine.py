@@ -62,6 +62,14 @@ class TweakEngine:
                 pass
         return bool(self.state.get(tweak.id, {}).get("applied"))
 
+    def applied_tweaks(self) -> List[st.Tweak]:
+        """Tweaks currently recorded as applied (per saved state)."""
+        return [t for t in st.all_tweaks() if self.state.get(t.id, {}).get("applied")]
+
+    def revert_all(self) -> List[st.TweakResult]:
+        """Revert every tweak currently marked applied. Returns each result."""
+        return [self.revert(t) for t in self.applied_tweaks()]
+
     # --------------------------------------------------------------- actions --
     def _run_cmds(self, cmds: List[List[str]], actions: List[str]) -> Optional[str]:
         """Run command list; return an error string on first failure else None."""

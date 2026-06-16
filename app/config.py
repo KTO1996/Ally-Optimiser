@@ -33,6 +33,9 @@ DEFAULTS: Dict[str, Any] = {
     "device_override": None,          # force "ROG Ally" / "ROG Ally X" if mis-detected
     "anyfse_path": None,              # optional path to AnyFSE.exe for the Boost tab
     "auto_hibernate_minutes": 30,     # default timeout for the auto-hibernate control
+    "auto_apply": False,              # auto-apply a game's profile when it launches
+    "library_view": "list",           # "list" or "grid" for the Games library
+    "seen_welcome": False,            # first-run onboarding shown?
     # Safety clamps (watts) sent to RyzenAdj. The Z2/Z2 Extreme is comfortable
     # in roughly this band; clamp keeps a bad profile from doing harm.
     "min_tdp": 5,

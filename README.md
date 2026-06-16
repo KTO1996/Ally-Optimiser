@@ -20,9 +20,13 @@ app with a modern dark/light, ROG red/black UI.
 | --- | --- |
 | ![Boost](assets/screenshot_dark_boost.png) | ![Hibernation](assets/screenshot_dark_hibernation.png) |
 
-| Armoury Crate | Light theme |
+| Armoury Crate | Settings |
 | --- | --- |
-| ![Armoury Crate](assets/screenshot_dark_armourycrate.png) | ![Light theme](assets/screenshot_light_hibernation.png) |
+| ![Armoury Crate](assets/screenshot_dark_armourycrate.png) | ![Settings](assets/screenshot_dark_settings.png) |
+
+| Library grid view | Light theme |
+| --- | --- |
+| ![Grid](assets/screenshot_dark_grid.png) | ![Light theme](assets/screenshot_light_hibernation.png) |
 
 ## Tabs
 
@@ -39,6 +43,15 @@ app with a modern dark/light, ROG red/black UI.
   timeout, and hibernate-now (fixes overnight battery drain).
 - **Armoury Crate** — guided checklist + deep links (Armoury Crate has no public
   API, so these can't be toggled directly).
+- **Settings** — auto-apply-on-launch, hotkey/tray toggles, console-model
+  override, RyzenAdj path, config backup/restore, "revert all tweaks", and an
+  update check.
+
+Extras: **auto-apply on game launch** (and reset on exit), **quick presets**
+(Silent/Balanced/Turbo/Max scaled to your model), **battery-life estimates**,
+**list/grid library** with cover art, a **TDP slider**, optional **display-
+resolution apply**, **config export/import**, an **update checker**, and a
+first-run **welcome** guide.
 
 ## Features
 

@@ -4,5 +4,5 @@ for the ROG Xbox Ally (AMD Z2 / Z2 Extreme APU).
 See BRIEF.md for the full project context and constraints.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.3.0"
 APP_NAME = "Ally Optimizer"

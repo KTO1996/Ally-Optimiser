@@ -21,10 +21,11 @@ from typing import Callable, Dict, List, Optional
 
 import customtkinter as ctk
 
-from . import APP_NAME, __version__, armoury, boost, config as cfg
-from . import covers, hibernate, importer, pcgamingwiki, power, profiles as prof
-from . import ryzenadj, sysinfo, weblinks
+from . import APP_NAME, __version__, armoury, backup, batteryest, boost, config as cfg
+from . import covers, display, hibernate, importer, pcgamingwiki, power
+from . import presets, profiles as prof, ryzenadj, sysinfo, updates, weblinks
 from . import systweaks as st
+from .watcher import GameWatcher, process_name_map
 from .hotkey import HotkeyManager
 from .paths import ICON_ICO, ICON_PNG
 from .scanners import DetectedGame, scan_all
@@ -38,7 +39,7 @@ ACCENT = "#e2001a"
 ACCENT_HOVER = "#b3001a"
 RISK_COLORS = {"safe": "#2ea043", "aggressive": "#d29922", "experimental": "#f85149"}
 
-NAV_ITEMS = ("Games", "System Tweaks", "Boost", "Hibernation", "Armoury Crate")
+NAV_ITEMS = ("Games", "System Tweaks", "Boost", "Hibernation", "Armoury Crate", "Settings")
 
 try:
     from PIL import Image  # for the sidebar logo
@@ -74,16 +75,23 @@ class AllyOptimizerApp(ctk.CTk):
 
         self.device = sysinfo.detect_device(self.config_data.get("device_override"))
         self.engine = TweakEngine()
+        self.library_view = self.config_data.get("library_view", "list")
 
         self.hotkeys = HotkeyManager()
         self.tray: Optional[TrayIcon] = None
+        self.watcher = GameWatcher(
+            get_proc_map=lambda: process_name_map(self.games_doc),
+            on_start=lambda g: self.after(0, lambda: self._auto_apply(g)),
+            on_stop=lambda g: self.after(0, lambda: self._auto_revert(g)))
 
         self._build_shell()
         self._show_page("Games")
         self._tick_status()
         self._setup_hotkey()
         self._setup_tray()
+        self._setup_watcher()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.after(400, self._maybe_onboard)
 
     def _set_window_icon(self) -> None:
         try:
@@ -189,11 +197,14 @@ class AllyOptimizerApp(ctk.CTk):
         except Exception:
             return None
 
-    def _load_cover_async(self, name: str, label: ctk.CTkLabel) -> None:
+    def _load_cover_into(self, name: str, label: ctk.CTkLabel, size=(150, 225),
+                         guard_selected: bool = True) -> None:
         """Resolve a cover in the background; on success cache it + update UI."""
         game = prof.find_game(self.games_doc, name)
         det = self.detected.get(name)
         appid = det.appid if det else None
+        if covers.cached_cover(game):
+            return  # already shown
         if not (game and game.get("cover")) and not appid:
             return
 
@@ -201,7 +212,6 @@ class AllyOptimizerApp(ctk.CTk):
             path = covers.resolve_cover(game, appid, allow_network=True)
             if not path:
                 return
-            # Persist the local cover path so it shows instantly next time.
             if game is not None and game.get("cover") != path:
                 prof.upsert_game(self.games_doc, name,
                                  (game or {}).get("process_name", ""),
@@ -209,14 +219,19 @@ class AllyOptimizerApp(ctk.CTk):
                                  source=(game or {}).get("source", "manual entry"),
                                  cover=path)
                 prof.save_games(self.games_doc)
-            self.after(0, lambda: self._apply_cover(label, path, name))
+            self.after(0, lambda: self._apply_cover(label, path, name, size, guard_selected))
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _apply_cover(self, label: ctk.CTkLabel, path: str, name: str) -> None:
-        if self.selected_game != name or not label.winfo_exists():
+    def _apply_cover(self, label, path, name, size, guard_selected) -> None:
+        if guard_selected and self.selected_game != name:
             return
-        img = self._cover_image(path, (150, 225))
+        try:
+            if not label.winfo_exists():
+                return
+        except Exception:
+            return
+        img = self._cover_image(path, size)
         if img is not None:
             label.configure(image=img, text="")
 
@@ -236,6 +251,7 @@ class AllyOptimizerApp(ctk.CTk):
             "Boost": self._page_boost,
             "Hibernation": self._page_hibernation,
             "Armoury Crate": self._page_armoury,
+            "Settings": self._page_settings,
         }[name]
         builder()
 
@@ -254,23 +270,64 @@ class AllyOptimizerApp(ctk.CTk):
                       command=lambda: self._open_edit_form(), width=100,
                       fg_color=("gray75", "gray30"), hover_color=("gray65", "gray38"),
                       text_color=("gray10", "gray90")).pack(side="right", padx=6)
-        ctk.CTkButton(self.header, text="RyzenAdj…", command=self._choose_ryzenadj,
-                      width=90, fg_color="transparent", border_width=1, text_color=("gray10", "gray90"), border_color=("gray65", "gray45"), hover_color=("gray85", "gray25")).pack(side="right", padx=6)
-        ctk.CTkButton(self.header, text="⟲ Reset TDP", command=self._on_reset,
-                      width=100, fg_color="transparent", border_width=1, text_color=("gray10", "gray90"), border_color=("gray65", "gray45"), hover_color=("gray85", "gray25")).pack(side="right", padx=6)
+        view = ctk.CTkSegmentedButton(
+            self.header, values=["List", "Grid"], command=self._set_library_view,
+            selected_color=ACCENT, selected_hover_color=ACCENT_HOVER, width=120)
+        view.set("Grid" if self.library_view == "grid" else "List")
+        view.pack(side="right", padx=10)
 
+        if self.library_view == "grid":
+            self._build_games_grid()
+        else:
+            self._build_games_split()
+
+    def _set_library_view(self, value: str) -> None:
+        self.library_view = "grid" if value == "Grid" else "list"
+        self.config_data["library_view"] = self.library_view
+        cfg.save_config(self.config_data)
+        self._show_page("Games")   # clears header/body before rebuilding
+
+    def _build_games_split(self) -> None:
         wrap = ctk.CTkFrame(self.body, fg_color="transparent")
         wrap.grid(row=0, column=0, sticky="nsew")
         wrap.grid_rowconfigure(0, weight=1)
         wrap.grid_columnconfigure(1, weight=1)
-
         self.game_list = ctk.CTkScrollableFrame(wrap, width=240, label_text="Library")
         self.game_list.grid(row=0, column=0, sticky="ns", padx=(0, 10))
         self.detail = ctk.CTkScrollableFrame(wrap, fg_color="transparent")
         self.detail.grid(row=0, column=1, sticky="nsew")
-
         self._refresh_game_list()
         self._render_detail()
+
+    def _build_games_grid(self) -> None:
+        grid = ctk.CTkScrollableFrame(self.body, fg_color="transparent")
+        grid.grid(row=0, column=0, sticky="nsew")
+        cols = 5
+        for c in range(cols):
+            grid.grid_columnconfigure(c, weight=1)
+        for i, entry in enumerate(self._all_entries()):
+            name = self._entry_to_name(entry)
+            tile = ctk.CTkFrame(grid, corner_radius=10)
+            tile.grid(row=i // cols, column=i % cols, padx=8, pady=8, sticky="n")
+            game = prof.find_game(self.games_doc, name)
+            cover_lbl = ctk.CTkLabel(tile, text="", width=150, height=225)
+            cached = covers.cached_cover(game)
+            img = self._cover_image(cached, (150, 225)) if cached else None
+            if img is not None:
+                cover_lbl.configure(image=img)
+            else:
+                cover_lbl.configure(text="🎮\n" + name, font=ctk.CTkFont(size=12))
+            cover_lbl.pack(padx=8, pady=(8, 4))
+            self._load_cover_into(name, cover_lbl, (150, 225), guard_selected=False)
+            self._accent_button(tile, "Open", lambda n=name: self._open_from_grid(n),
+                                width=130).pack(pady=(0, 10))
+
+    def _open_from_grid(self, name: str) -> None:
+        self.selected_game = name
+        self.library_view = "list"
+        self.config_data["library_view"] = "list"
+        cfg.save_config(self.config_data)
+        self._show_page("Games")   # clears header/body before rebuilding
 
     def _all_entries(self) -> List[str]:
         saved = sorted(self.games_doc.get("games", {}).keys(), key=str.lower)
@@ -324,13 +381,25 @@ class AllyOptimizerApp(ctk.CTk):
         if img is not None:
             cover_label.configure(image=img)
         cover_label.pack(side="left", padx=(0, 14), pady=(0, 6))
-        self._load_cover_async(name, cover_label)   # fetch/refresh in background
+        self._load_cover_into(name, cover_label)   # fetch/refresh in background
 
         info = ctk.CTkFrame(head, fg_color="transparent")
         info.pack(side="left", fill="x", expand=True, anchor="n")
         ctk.CTkLabel(info, text=name,
                      font=ctk.CTkFont(size=18, weight="bold")).pack(anchor="w")
         self._add_find_settings(name, info)
+
+        # Quick presets (apply instantly, scaled to this console).
+        ctk.CTkLabel(info, text="Quick presets", text_color="gray60",
+                     font=ctk.CTkFont(size=11)).pack(anchor="w", pady=(4, 0))
+        prow = ctk.CTkFrame(info, fg_color="transparent")
+        prow.pack(anchor="w")
+        for preset in presets.presets_for(self.device.model):
+            ctk.CTkButton(prow, text=preset["label"], width=70, height=26,
+                          fg_color=("gray75", "gray30"), hover_color=("gray65", "gray38"),
+                          text_color=("gray10", "gray90"),
+                          command=lambda p=preset, n=name: self._apply(n, p)).pack(
+                              side="left", padx=(0, 6), pady=2)
 
         if not game or not game.get("profiles"):
             ctk.CTkLabel(self.detail, text="No saved profile for this game yet.",
@@ -361,8 +430,10 @@ class AllyOptimizerApp(ctk.CTk):
         card.pack(fill="x", pady=6)
         s = profile.get("tdp_sustained", "?")
         b = profile.get("tdp_boost", "?")
+        batt = batteryest.estimate_text(profile, self.device.model)
         meta = (f"{profile.get('resolution', '?')}  ·  {s}/{b} W  ·  "
-                f"{profile.get('fps_cap', 0) or '∞'} fps")
+                f"{profile.get('fps_cap', 0) or '∞'} fps"
+                + (f"  ·  {batt}" if batt else ""))
         top = ctk.CTkFrame(card, fg_color="transparent")
         top.pack(fill="x", padx=12, pady=(10, 2))
         self._accent_button(top, f"▶ {profile.get('label', 'Profile')}",
@@ -724,7 +795,7 @@ class AllyOptimizerApp(ctk.CTk):
             eff["tdp_boost"] = eff.get("tdp_sustained", eff.get("tdp_boost"))
         return eff
 
-    def _apply(self, game_name: str, profile: Dict) -> None:
+    def _apply(self, game_name: str, profile: Dict, announce: bool = True) -> None:
         eff = self._effective_profile(profile)
         result = ryzenadj.apply_profile(eff, self.config_data)
         cmd_str = " ".join(result.command)
@@ -733,11 +804,20 @@ class AllyOptimizerApp(ctk.CTk):
                 "game": game_name, "profile_label": profile.get("label", "")}
             cfg.save_config(self.config_data)
             self.applied_var.set(f"Applied: {game_name} — {profile.get('label', '')}")
-        elif result.dry_run:
+            self._maybe_apply_resolution(profile)
+        elif result.dry_run and announce:
             messagebox.showinfo("Dry-run (RyzenAdj not found)",
                                 f"{result.message}\n\nWould run:\n{cmd_str}")
-        else:
+        elif announce:
             messagebox.showerror("Apply failed", f"{result.message}\n\n{cmd_str}")
+
+    def _maybe_apply_resolution(self, profile: Dict) -> None:
+        """If the profile opts in, switch the display to its resolution."""
+        if not profile.get("apply_resolution"):
+            return
+        parsed = display.parse_resolution(profile.get("resolution", ""))
+        if parsed:
+            display.set_mode(parsed[0], parsed[1], sysinfo.PANEL_HZ)
 
     def _on_reset(self) -> None:
         result = ryzenadj.reset(self.config_data)
@@ -807,6 +887,181 @@ class AllyOptimizerApp(ctk.CTk):
     def _open_edit_form(self, name: Optional[str] = None) -> None:
         EditGameDialog(self, name)
 
+    # =========================================================== Settings ====
+    def _page_settings(self) -> None:
+        self._header_title("Settings")
+        scroller = ctk.CTkScrollableFrame(self.body, fg_color="transparent")
+        scroller.grid(row=0, column=0, sticky="nsew")
+
+        # --- Automation ---
+        card = self._card(scroller)
+        card.pack(fill="x", pady=6)
+        ctk.CTkLabel(card, text="Automation", font=ctk.CTkFont(size=14, weight="bold")
+                     ).pack(anchor="w", padx=12, pady=(10, 4))
+        self.auto_apply_switch = ctk.CTkSwitch(
+            card, text="Auto-apply a game's profile when it launches "
+            "(and reset on exit)", progress_color=ACCENT, command=self._toggle_auto_apply)
+        if self.config_data.get("auto_apply"):
+            self.auto_apply_switch.select()
+        self.auto_apply_switch.pack(anchor="w", padx=12, pady=(0, 4))
+        if not self.watcher.available():
+            ctk.CTkLabel(card, text="(psutil not available — auto-apply disabled)",
+                         text_color="gray60", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=12)
+        self._toggle_row(card, "enable_hotkey", "Global hotkey to reapply last profile")
+        self._toggle_row(card, "minimize_to_tray", "Minimise to system tray on close")
+        ctk.CTkLabel(card, text="", height=4).pack()
+
+        # --- Hardware / paths ---
+        card2 = self._card(scroller)
+        card2.pack(fill="x", pady=6)
+        ctk.CTkLabel(card2, text="Hardware & paths", font=ctk.CTkFont(size=14, weight="bold")
+                     ).pack(anchor="w", padx=12, pady=(10, 4))
+        row = ctk.CTkFrame(card2, fg_color="transparent")
+        row.pack(anchor="w", padx=12, pady=4)
+        ctk.CTkLabel(row, text="Console model:").pack(side="left", padx=(0, 8))
+        self.device_var = ctk.StringVar(
+            value=self.config_data.get("device_override") or "Auto-detect")
+        ctk.CTkOptionMenu(row, variable=self.device_var, width=180,
+                          values=["Auto-detect", sysinfo.ALLY, sysinfo.ALLY_X],
+                          fg_color=ACCENT, button_color=ACCENT_HOVER,
+                          button_hover_color=ACCENT_HOVER,
+                          command=self._set_device_override).pack(side="left")
+        rrow = ctk.CTkFrame(card2, fg_color="transparent")
+        rrow.pack(anchor="w", padx=12, pady=(4, 10))
+        ctk.CTkLabel(rrow, text=f"RyzenAdj: {self.config_data.get('ryzenadj_path', '—')}",
+                     text_color="gray60", font=ctk.CTkFont(size=11)).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(rrow, text="Set RyzenAdj…", width=120, command=self._choose_ryzenadj,
+                      fg_color=("gray75", "gray30"), hover_color=("gray65", "gray38"),
+                      text_color=("gray10", "gray90")).pack(side="left")
+
+        # --- Backup / safety ---
+        card3 = self._card(scroller)
+        card3.pack(fill="x", pady=6)
+        ctk.CTkLabel(card3, text="Backup & safety", font=ctk.CTkFont(size=14, weight="bold")
+                     ).pack(anchor="w", padx=12, pady=(10, 4))
+        brow = ctk.CTkFrame(card3, fg_color="transparent")
+        brow.pack(anchor="w", padx=12, pady=(0, 10))
+        self._accent_button(brow, "Export config…", self._export_config, width=130).pack(side="left")
+        ctk.CTkButton(brow, text="Import config…", command=self._import_config, width=130,
+                      fg_color=("gray75", "gray30"), hover_color=("gray65", "gray38"),
+                      text_color=("gray10", "gray90")).pack(side="left", padx=8)
+        ctk.CTkButton(brow, text="⟲ Revert ALL tweaks", command=self._revert_all_tweaks,
+                      width=160, fg_color="transparent", border_width=1,
+                      text_color=("gray10", "gray90"), border_color=("gray65", "gray45"),
+                      hover_color=("gray85", "gray25")).pack(side="left", padx=8)
+
+        # --- About / updates ---
+        card4 = self._card(scroller)
+        card4.pack(fill="x", pady=6)
+        ctk.CTkLabel(card4, text=f"Ally Optimizer v{__version__}",
+                     font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=12, pady=(10, 2))
+        self._accent_button(card4, "Check for updates", self._check_updates,
+                            width=150).pack(anchor="w", padx=12, pady=(0, 12))
+
+    def _toggle_row(self, parent, key: str, label: str) -> None:
+        sw = ctk.CTkSwitch(parent, text=label, progress_color=ACCENT,
+                           command=lambda: self._set_config_flag(key, sw.get()))
+        if self.config_data.get(key, True):
+            sw.select()
+        sw.pack(anchor="w", padx=12, pady=2)
+
+    def _set_config_flag(self, key: str, value) -> None:
+        self.config_data[key] = bool(value)
+        cfg.save_config(self.config_data)
+
+    def _set_device_override(self, choice: str) -> None:
+        self.config_data["device_override"] = None if choice == "Auto-detect" else choice
+        cfg.save_config(self.config_data)
+        self.device = sysinfo.detect_device(self.config_data.get("device_override"))
+        self.device_label.configure(text=self.device.summary())
+
+    def _toggle_auto_apply(self) -> None:
+        on = bool(self.auto_apply_switch.get())
+        self.config_data["auto_apply"] = on
+        cfg.save_config(self.config_data)
+        if on:
+            self.watcher.start()
+        else:
+            self.watcher.stop()
+
+    def _export_config(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="Export config", defaultextension=".zip",
+            initialfile="ally-optimizer-backup.zip",
+            filetypes=[("Zip", "*.zip")])
+        if not path:
+            return
+        included = backup.export_config(path)
+        messagebox.showinfo("Export", "Saved backup with: " + ", ".join(included))
+
+    def _import_config(self) -> None:
+        path = filedialog.askopenfilename(title="Import config",
+                                          filetypes=[("Zip", "*.zip"), ("All", "*.*")])
+        if not path:
+            return
+        restored = backup.import_config(path)
+        # Reload from disk.
+        self.config_data = cfg.load_config()
+        self.games_doc = prof.load_games()
+        messagebox.showinfo("Import", "Restored: " + ", ".join(restored)
+                            + "\n\nSome changes may need a restart.")
+        self._show_page("Games")
+
+    def _revert_all_tweaks(self) -> None:
+        applied = self.engine.applied_tweaks()
+        if not applied:
+            messagebox.showinfo("Revert all", "No tweaks are currently applied.")
+            return
+        if not messagebox.askyesno("Revert all tweaks",
+                                   f"Revert all {len(applied)} applied tweaks now?"):
+            return
+        results = self.engine.revert_all()
+        failed = [r.tweak_id for r in results if not r.ok]
+        if failed:
+            messagebox.showwarning("Revert all", "Some failed: " + ", ".join(failed))
+        else:
+            messagebox.showinfo("Revert all", f"Reverted {len(results)} tweaks.")
+
+    def _check_updates(self) -> None:
+        self.configure(cursor="watch")
+        self.update_idletasks()
+        try:
+            info = updates.check_for_update(__version__)
+        finally:
+            self.configure(cursor="")
+        if info is None:
+            messagebox.showinfo("Updates", "Couldn't reach GitHub to check for updates.")
+        elif info.update_available:
+            if messagebox.askyesno("Update available",
+                                   f"v{info.latest} is available (you have v{info.current}).\n\n"
+                                   "Open the releases page?"):
+                weblinks.open_link(info.url)
+        else:
+            messagebox.showinfo("Updates", f"You're on the latest version (v{info.current}).")
+
+    # ----------------------------------------------- auto-apply / onboarding -
+    def _setup_watcher(self) -> None:
+        if self.config_data.get("auto_apply") and self.watcher.available():
+            self.watcher.start()
+
+    def _auto_apply(self, game_name: str) -> None:
+        game = prof.find_game(self.games_doc, game_name)
+        if game and game.get("profiles"):
+            self._apply(game_name, game["profiles"][0], announce=False)
+            self.applied_var.set(f"Auto-applied {game_name} (launch detected).")
+
+    def _auto_revert(self, game_name: str) -> None:
+        ryzenadj.reset(self.config_data)
+        display.restore()
+        self.applied_var.set(f"{game_name} closed — reset to default.")
+
+    def _maybe_onboard(self) -> None:
+        if self.config_data.get("seen_welcome"):
+            return
+        self.config_data["seen_welcome"] = True
+        cfg.save_config(self.config_data)
+        WelcomeDialog(self)
+
     # ----------------------------------------------------------- lifecycle --
     def _toggle_theme(self) -> None:
         self.theme_mode = "light" if self.theme_switch.get() else "dark"
@@ -849,7 +1104,41 @@ class AllyOptimizerApp(ctk.CTk):
         self.hotkeys.unregister()
         if self.tray is not None:
             self.tray.stop()
+        self.watcher.stop()
         self.destroy()
+
+
+class WelcomeDialog(ctk.CTkToplevel):
+    """First-run onboarding: a quick orientation + RyzenAdj prompt."""
+
+    def __init__(self, app: "AllyOptimizerApp") -> None:
+        super().__init__(app)
+        self.app = app
+        self.title("Welcome to Ally Optimizer")
+        self.geometry("520x420")
+        self.transient(app)
+        ctk.CTkLabel(self, text="Welcome to Ally Optimizer 👋",
+                     font=ctk.CTkFont(size=20, weight="bold")).pack(anchor="w", padx=20, pady=(20, 6))
+        steps = (
+            "• Games — set a per-game TDP profile and Apply it (RyzenAdj).\n"
+            "• System Tweaks — reversible Windows optimisations (make a restore point).\n"
+            "• Boost — AFMF/RSR/FSR guidance + Fullscreen-Exclusive.\n"
+            "• Hibernation — stop overnight battery drain.\n"
+            "• Settings — auto-apply on launch, backups, updates.\n\n"
+            "To actually set power limits you need RyzenAdj (free, separate). "
+            "Point the app at ryzenadj.exe to get started."
+        )
+        ctk.CTkLabel(self, text=steps, justify="left", font=ctk.CTkFont(size=12),
+                     wraplength=480).pack(anchor="w", padx=20)
+        btns = ctk.CTkFrame(self, fg_color="transparent")
+        btns.pack(pady=18)
+        ctk.CTkButton(btns, text="Set RyzenAdj path", fg_color=ACCENT,
+                      hover_color=ACCENT_HOVER,
+                      command=lambda: (self.app._choose_ryzenadj(), self.destroy())).pack(side="left", padx=6)
+        ctk.CTkButton(btns, text="I'll do it later", command=self.destroy,
+                      fg_color=("gray75", "gray30"), hover_color=("gray65", "gray38"),
+                      text_color=("gray10", "gray90")).pack(side="left", padx=6)
+        self.after(60, self.lift)
 
 
 class EditGameDialog(ctk.CTkToplevel):
@@ -859,12 +1148,13 @@ class EditGameDialog(ctk.CTkToplevel):
         super().__init__(app)
         self.app = app
         self.title("Edit game" if name else "Add game")
-        self.geometry("440x620")
+        self.geometry("460x740")
         self.transient(app)
         existing = prof.find_game(app.games_doc, name) if name else None
         first = (existing or {}).get("profiles", [{}])
         first = first[0] if first else {}
         self.imported_cover: Optional[str] = None
+        self._tdp_max = app.device.tdp_profile["max"] + 5
 
         # --- Import from link / text --------------------------------------- #
         imp = ctk.CTkFrame(self, corner_radius=10)
@@ -882,20 +1172,34 @@ class EditGameDialog(ctk.CTkToplevel):
                       hover_color=ACCENT_HOVER, width=100).pack(anchor="w", padx=10, pady=(4, 10))
 
         self.vars: Dict[str, ctk.StringVar] = {}
-        rows = [
+        text_rows = [
             ("Game name", "name", name or ""),
             ("Process .exe", "process_name", (existing or {}).get("process_name", "")),
             ("Profile label", "label", first.get("label", "Custom")),
-            ("TDP sustained (W)", "tdp_sustained", str(first.get("tdp_sustained", 15))),
-            ("TDP boost (W)", "tdp_boost", str(first.get("tdp_boost", 20))),
-            ("Resolution", "resolution", first.get("resolution", "1920x1080")),
-            ("FPS cap (0 = none)", "fps_cap", str(first.get("fps_cap", 0))),
         ]
-        for label, key, value in rows:
+        for label, key, value in text_rows:
             ctk.CTkLabel(self, text=label).pack(anchor="w", padx=16, pady=(6, 0))
             var = ctk.StringVar(value=value)
-            ctk.CTkEntry(self, textvariable=var, width=380).pack(padx=16)
+            ctk.CTkEntry(self, textvariable=var, width=420).pack(padx=16)
             self.vars[key] = var
+
+        # TDP sliders (snapped to the console's band).
+        self._tdp_slider("TDP sustained", "tdp_sustained", int(first.get("tdp_sustained", 15)))
+        self._tdp_slider("TDP boost", "tdp_boost", int(first.get("tdp_boost", 20)))
+
+        for label, key, value in (("Resolution", "resolution",
+                                    first.get("resolution", "1920x1080")),
+                                   ("FPS cap (0 = none)", "fps_cap",
+                                    str(first.get("fps_cap", 0)))):
+            ctk.CTkLabel(self, text=label).pack(anchor="w", padx=16, pady=(6, 0))
+            var = ctk.StringVar(value=str(value))
+            ctk.CTkEntry(self, textvariable=var, width=420).pack(padx=16)
+            self.vars[key] = var
+
+        self.apply_res_var = ctk.BooleanVar(value=bool(first.get("apply_resolution")))
+        ctk.CTkSwitch(self, text="Also set the display to this resolution on Apply",
+                      variable=self.apply_res_var, progress_color=ACCENT).pack(
+                          anchor="w", padx=16, pady=(10, 2))
 
         btns = ctk.CTkFrame(self, fg_color="transparent")
         btns.pack(pady=14)
@@ -906,6 +1210,24 @@ class EditGameDialog(ctk.CTkToplevel):
         if name:
             self.vars["name"].set(name)
         self.after(50, self.lift)
+
+    def _tdp_slider(self, label: str, key: str, value: int) -> None:
+        var = ctk.StringVar(value=str(value))
+        self.vars[key] = var
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.pack(fill="x", padx=16, pady=(6, 0))
+        ctk.CTkLabel(head, text=label).pack(side="left")
+        val_lbl = ctk.CTkLabel(head, textvariable=var, text_color=ACCENT,
+                               font=ctk.CTkFont(weight="bold"))
+        val_lbl.pack(side="left", padx=(6, 0))
+        ctk.CTkLabel(head, text="W").pack(side="left")
+        slider = ctk.CTkSlider(self, from_=5, to=self._tdp_max,
+                               number_of_steps=self._tdp_max - 5,
+                               progress_color=ACCENT, button_color=ACCENT,
+                               button_hover_color=ACCENT_HOVER,
+                               command=lambda v: var.set(str(int(float(v)))))
+        slider.set(max(5, min(self._tdp_max, value)))
+        slider.pack(fill="x", padx=16)
 
     def _import(self) -> None:
         text = self.import_box.get("1.0", "end").strip()
@@ -959,6 +1281,7 @@ class EditGameDialog(ctk.CTkToplevel):
             "tdp_sustained": tdp_s, "tdp_boost": tdp_b,
             "resolution": self.vars["resolution"].get().strip(),
             "fps_cap": fps,
+            "apply_resolution": bool(self.apply_res_var.get()),
             "notes": "",
         }
         existing = prof.find_game(self.app.games_doc, name)
