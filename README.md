@@ -24,9 +24,13 @@ app with a modern dark/light, ROG red/black UI.
 | --- | --- |
 | ![Armoury Crate](assets/screenshot_dark_armourycrate.png) | ![Settings](assets/screenshot_dark_settings.png) |
 
-| Library grid view | Light theme |
+| Library grid (cover art) | Library grid (placeholder art) |
 | --- | --- |
-| ![Grid](assets/screenshot_dark_grid.png) | ![Light theme](assets/screenshot_light_hibernation.png) |
+| ![Grid](assets/screenshot_dark_grid.png) | ![Grid placeholders](assets/screenshot_dark_grid_placeholders.png) |
+
+| Light theme | |
+| --- | --- |
+| ![Light theme](assets/screenshot_light_hibernation.png) | |
 
 ## Tabs
 
@@ -88,15 +92,36 @@ controller: D-pad to move, A to select, LB/RB to switch tabs), and a first-run
 - **System tray** (minimize-to-tray) and a **global hotkey** to reapply the last
   profile.
 - **Status bar** — battery %, plugged state, and CPU temperature via `psutil`.
+- **Auto-apply on launch** — a background watcher sets a game's profile when its
+  process starts and resets on exit (toggle in Settings).
+- **Quick presets** — Silent / Balanced / Turbo / Max, scaled to your model.
+- **Profile validation** — ✓/⚠ badges flag a profile that won't suit your
+  console (TDP over the model band, resolution above the 1080p panel, FPS > 120).
+- **Cover art** — auto-fetched for Steam games (cached); games without art get a
+  generated grey gradient placeholder with the title. **List or grid** library.
+- **Import settings** — paste a PCGamingWiki/guide link or copied settings text
+  in the Add/Edit dialog to fill TDP / resolution / FPS (with a clear warning
+  before any non-API web fetch — see the no-scraping note below).
+- **Battery-life estimates**, a **TDP slider**, and optional **display-resolution
+  apply** when a profile is applied.
+- **Gamepad navigation** — drive the whole app with an Xbox controller
+  (D-pad/stick to move focus, A to select, B back to Games, LB/RB to switch
+  tabs). Toggle in Settings; uses Windows XInput, no extra dependency.
+- **Config backup / restore** (zip) and a one-click **revert all tweaks**.
+- **Update checker** against GitHub Releases, and a first-run **welcome** guide.
 
 ## Requirements
 
 - Windows 11 (the Ally's OS). Admin rights — the app self-elevates via UAC
   because RyzenAdj needs them.
 - Python 3.10+ with Tkinter (included in the python.org Windows installer).
-- Python packages: `pip install -r requirements.txt`
-  (`psutil`, plus optional `pystray`/`Pillow` for the tray and `keyboard` for the
-  hotkey — the app runs fine without the optional ones).
+- Python packages: `pip install -r requirements.txt` —
+  `customtkinter` (modern UI) and `Pillow` (cover art) are needed; `psutil`
+  (battery/auto-apply), `pystray` (tray) and `keyboard` (hotkey) are optional
+  and the app degrades gracefully without them.
+- **Or skip all of this** and download the pre-built `.exe` from
+  [Releases](https://github.com/KTO1996/Ally-Optimiser/releases) — no Python
+  needed.
 
 ## RyzenAdj setup (required, not bundled)
 
@@ -191,11 +216,14 @@ A GitHub Actions workflow builds the exe on a Windows runner automatically:
 
 - **Every push to `main`** uploads `AllyOptimizer-windows.zip` as a build
   artifact (Actions tab → latest run → Artifacts).
-- **Tagging a release** publishes a GitHub Release with the zip attached:
+- **Publishing a release** (exe attached) happens one of two ways:
+  - push a tag: `git tag v1.4.0 && git push origin v1.4.0`, or
+  - **Actions → "Build Windows exe" → Run workflow**, and enter a version like
+    `v1.4.0` (handy if tag pushes are restricted).
 
-  ```sh
-  git tag v1.0.0 && git push origin v1.0.0
-  ```
+Before building, CI also runs the test suite **and launches the app on the
+Windows runner** (`python main.py --smoke`) so a broken build can't reach a
+release.
 
 Download the zip on the Ally, unzip it, drop `ryzenadj.exe` in the folder, and
 double-click `AllyOptimizer.exe`. No Python install required.
@@ -240,30 +268,64 @@ tested values.
 ## Project layout
 
 ```
-main.py              entry point + admin self-elevation
-app/gui.py           Tkinter UI
-app/ryzenadj.py      command building, apply/reset, W->mW, clamps, dry-run
-app/scanners.py      Steam/Xbox/Epic/GOG/registry/Start-menu scanners
-app/profiles.py      games.json load/save
-app/config.py        config.json load/save
-app/power.py         psutil battery/temp readout
-app/pcgamingwiki.py  algorithmic suggestion via PCGamingWiki API
-app/weblinks.py      Find-settings browser links
-app/tray.py          system tray (optional)
-app/hotkey.py        reapply-last global hotkey (optional)
-profiles/            games.json + config.json (yours to edit)
-tests/test_logic.py  smoke tests for the pure-Python logic
+main.py               entry point, admin self-elevation, --smoke self-test
+app/gui.py            CustomTkinter UI (sidebar shell, all pages, dialogs)
+app/__init__.py       app name + version
+
+  Power / games
+app/ryzenadj.py       command building, apply/reset, W->mW, clamps, dry-run
+app/scanners.py       Steam/Xbox/Epic/GOG/registry/Start-menu scanners
+app/profiles.py       games.json load/save
+app/config.py         config.json load/save + defaults
+app/power.py          psutil battery/temp readout
+app/sysinfo.py        Ally vs Ally X detection + per-model profile validation
+app/presets.py        Silent/Balanced/Turbo/Max presets
+app/batteryest.py     rough battery-runtime estimates
+app/watcher.py        auto-apply-on-launch process watcher
+
+  Optimisation
+app/systweaks.py      reversible Windows tweak catalogue
+app/tweakengine.py    apply/revert engine + restore point + revert-all
+app/hibernate.py      hibernation controls (powercfg)
+app/boost.py          AFMF/RSR/FSR guidance, FSE toggle, app detect/launch
+app/armoury.py        Armoury Crate checklist + deep links
+app/display.py        display resolution/refresh apply + restore (ctypes)
+app/wincmd.py         shared dry-run-aware Windows command runner
+
+  Content / UX
+app/covers.py         cover-art fetch/cache + generated placeholders
+app/importer.py       import a profile from pasted text or a link
+app/pcgamingwiki.py   algorithmic suggestion via PCGamingWiki API
+app/weblinks.py       Find-settings browser links
+app/backup.py         export/import config as a zip
+app/updates.py        GitHub-releases update check
+app/gamepad.py        Xbox-controller (XInput) navigation
+app/tray.py           system tray (optional)
+app/hotkey.py         reapply-last global hotkey (optional)
+
+assets/               icon + screenshots (bundled into the exe)
+profiles/             games.json + config.json (yours to edit)
+tools/make_icon.py    regenerate the app icon
+tools/render_screens.py  headless screenshot renderer
+tests/test_logic.py   tests for the pure-Python logic
+AllyOptimizer.spec    PyInstaller build spec
+.github/workflows/    Windows build + test + smoke + release
 ```
 
-## Tests
+## Tests & validation
 
 ```sh
 python tests/test_logic.py      # or: python -m pytest
 ```
 
-Tests cover the platform-independent logic (W→mW conversion, clamps, command
-building, `.acf` parsing, web-link building, seed JSON validity). The GUI,
-RyzenAdj execution, and Windows-only scanners are exercised on the device.
+36 tests cover the platform-independent logic: W→mW conversion, clamps and
+command building, `.acf` parsing, model detection and profile validation, the
+tweak catalogue and dry-run apply/revert round-trip, settings import parsing,
+battery/preset/update/backup/gamepad helpers, and more. On top of that, **CI
+runs these on a real Windows runner and launches the app** (building every page)
+so packaging or Windows-only regressions fail the build. The remaining
+hardware-touching actions (RyzenAdj TDP, `powercfg`, registry writes, AMD
+features) are confirmed on the device via the checklist above.
 
 ## License / credits
 

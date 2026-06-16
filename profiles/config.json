@@ -12,7 +12,7 @@
   "minimize_to_tray": true,
   "enable_hotkey": true,
   "enable_pcgamingwiki": true,
-  "theme": "dark",
+  "theme": "light",
   "device_override": null,
   "anyfse_path": null,
   "auto_hibernate_minutes": 30,

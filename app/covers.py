@@ -113,10 +113,10 @@ def _wrap(draw, text: str, font, max_width: int):
     return lines or [text]
 
 
-def placeholder_for(name: str, grey: bool = False) -> Optional[str]:
+def placeholder_for(name: str, grey: bool = True) -> Optional[str]:
     """Generate (and cache) a simple gradient placeholder with the game name.
 
-    A red (ROG) or grey vertical gradient box with the game's name centred —
+    A grey (default) or red vertical gradient box with the game's name centred —
     enough to tell games apart when no real cover is available. Returns None if
     Pillow isn't installed (the UI then falls back to text).
     """
