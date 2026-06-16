@@ -12,7 +12,36 @@ from app import APP_NAME
 from app.elevation import is_admin, relaunch_as_admin
 
 
+def run_smoke() -> int:
+    """Launch-and-exit self-test used by CI on a real Windows runner.
+
+    Builds the full UI and every page, which exercises the read-only Windows
+    paths (model detection, ``powercfg /a`` hibernation state, registry reads
+    for applied-tweak status, app detection) without touching any hardware or
+    writing anything. Returns non-zero if construction raises.
+    """
+    from app.gui import AllyOptimizerApp, NAV_ITEMS
+
+    # No tray/hotkey threads, and never elevate, during the self-test.
+    AllyOptimizerApp._setup_tray = lambda self: None       # type: ignore[assignment]
+    AllyOptimizerApp._setup_hotkey = lambda self: None      # type: ignore[assignment]
+
+    app = AllyOptimizerApp()
+    try:
+        for name in NAV_ITEMS:
+            app._show_page(name)
+            app.update_idletasks()
+            app.update()
+    finally:
+        app.destroy()
+    print("SMOKE OK — UI built and all pages rendered.")
+    return 0
+
+
 def main() -> int:
+    if "--smoke" in sys.argv:
+        return run_smoke()
+
     if sys.platform.startswith("win") and not is_admin():
         # Try to relaunch elevated. If the relaunch starts, exit this instance.
         if relaunch_as_admin():
