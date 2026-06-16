@@ -18,8 +18,9 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    # Ship the seed profiles alongside the exe (kept editable, not embedded).
-    datas=[('profiles', 'profiles')],
+    # Ship the seed profiles alongside the exe (kept editable, not embedded)
+    # and bundle the icon/screenshot assets used by the window + tray.
+    datas=[('profiles', 'profiles'), ('assets', 'assets')],
     # pystray picks a backend at runtime; include the Windows one explicitly.
     hiddenimports=['pystray._win32'],
     hookspath=[],
@@ -46,7 +47,7 @@ exe = EXE(
     disable_windowed_traceback=False,
     # Request admin in the exe manifest so UAC prompts on launch (RyzenAdj).
     uac_admin=True,
-    icon=None,
+    icon='assets/allyoptimizer.ico',
 )
 coll = COLLECT(
     exe,

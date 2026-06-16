@@ -14,6 +14,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app import ryzenadj  # noqa: E402
 from app import scanners  # noqa: E402
 from app import weblinks  # noqa: E402
+from app import sysinfo  # noqa: E402
+from app import systweaks  # noqa: E402
+from app import armoury  # noqa: E402
+from app.tweakengine import TweakEngine  # noqa: E402
 
 
 def test_watts_to_mw():
@@ -89,6 +93,64 @@ def test_games_json_seed_is_valid():
         doc = json.load(fh)
     assert "games" in doc
     assert "Left 4 Dead 2" in doc["games"]
+
+
+def test_classify_model():
+    assert sysinfo.classify_model("RC71L") == sysinfo.ALLY
+    assert sysinfo.classify_model("RC72LA") == sysinfo.ALLY_X
+    assert sysinfo.classify_model("RC73XA", 24) == sysinfo.ALLY_X   # Z2, lots of RAM
+    assert sysinfo.classify_model("RC73", 16) == sysinfo.ALLY        # Z2, base RAM
+    assert sysinfo.classify_model("Some Desktop") == sysinfo.UNKNOWN
+
+
+def test_device_tdp_profile_differs():
+    ally = sysinfo.DeviceInfo(model=sysinfo.ALLY)
+    allyx = sysinfo.DeviceInfo(model=sysinfo.ALLY_X)
+    assert allyx.tdp_profile["max"] > ally.tdp_profile["max"]
+
+
+def test_tweak_catalogue_integrity():
+    tweaks = systweaks.all_tweaks()
+    ids = [t.id for t in tweaks]
+    assert len(ids) == len(set(ids)), "tweak ids must be unique"
+    valid_risk = {systweaks.SAFE, systweaks.AGGRESSIVE, systweaks.EXPERIMENTAL}
+    for t in tweaks:
+        assert t.risk in valid_risk
+        # Every tweak must actually do something.
+        assert t.reg or t.apply_cmds
+        # Registry tweaks are reversible from captured state; command tweaks
+        # must carry an inverse OR be explicitly flagged non-reversible.
+        if t.apply_cmds and not t.reg:
+            assert t.revert_cmds or not t.reversible
+
+
+def test_engine_dry_run_apply_revert_roundtrip():
+    eng = TweakEngine(dry_run=True)
+    tw = next(t for t in systweaks.all_tweaks() if t.id == "game_mode_on")
+    applied = eng.apply(tw)
+    assert applied.ok and applied.dry_run
+    assert eng.state[tw.id]["applied"] is True
+    reverted = eng.revert(tw)
+    assert reverted.ok and reverted.dry_run
+    assert eng.state[tw.id]["applied"] is False
+
+
+def test_engine_dry_run_writes_no_state_file():
+    # Dry-run must never touch the real state file on disk.
+    from app import tweakengine
+    before = os.path.exists(tweakengine.STATE_FILE)
+    eng = TweakEngine(dry_run=True)
+    eng.apply(systweaks.all_tweaks()[0])
+    assert os.path.exists(tweakengine.STATE_FILE) == before
+
+
+def test_armoury_checklist_and_links():
+    items = armoury.checklist(sysinfo.DeviceInfo(model=sysinfo.ALLY_X))
+    assert any("TDP" in i.title for i in items)
+    assert any(i.native for i in items)          # some are replicable natively
+    links = armoury.deep_links()
+    assert any(l.kind == "app" for l in links)    # launch Armoury Crate
+    assert any(l.target.startswith("ms-settings:") for l in links)
 
 
 def _run_all():

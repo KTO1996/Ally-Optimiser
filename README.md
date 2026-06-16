@@ -1,14 +1,34 @@
 # Ally Optimizer
 
-A one-click per-game power/performance profile switcher for the **ROG Xbox Ally**
-(AMD Z2 / Z2 Extreme APU) on Windows 11. Pick a game, hit a profile button, and
-the app sets the APU's TDP via [RyzenAdj](https://github.com/FlyGoat/RyzenAdj) —
-no fiddling in Armoury Crate every time.
+A one-click optimiser for the **ROG Xbox Ally** and **ROG Xbox Ally X**
+(AMD Z2 / Z2 Extreme APU) on Windows 11. Set per-game TDP profiles, apply the
+Windows tweaks people recommend for handhelds (reversibly), and follow a guided
+Armoury Crate checklist — all from one app with a ROG red/black theme.
 
-![Ally Optimizer main window](docs/screenshot.png)
+| Dark | Light |
+| --- | --- |
+| ![Dark theme — System Tweaks](assets/screenshot_dark_tweaks.png) | ![Light theme — Armoury Crate](assets/screenshot_light_armoury.png) |
+
+## Tabs
+
+- **Games** — per-game power/performance profiles applied via
+  [RyzenAdj](https://github.com/FlyGoat/RyzenAdj).
+- **System Tweaks** — reversible Windows optimisation tweaks (power, gaming,
+  latency, visuals, debloat) with risk badges and one-click revert.
+- **Armoury Crate** — guided checklist + deep links (Armoury Crate has no public
+  API, so these can't be toggled directly).
 
 ## Features
 
+- **Auto-detects Ally vs Ally X** (model string + RAM) and tunes the recommended
+  TDP band per model; manual override via `device_override` in config.
+- **Dark & light themes** — toggle in the toolbar (remembered between launches).
+- **System Tweaks** — the "power-user" set commonly recommended for handhelds:
+  High Performance power plan, disable hibernation/USB-suspend, Game Mode,
+  disable Game DVR, HAGS, MPO fix, MMCSS/network-throttling/foreground-priority,
+  visual-effects-for-performance, telemetry/SysMain off, and a curated debloat.
+  **Every tweak is reversible** — Apply records the prior value, Revert restores
+  it, and you can drop a **System Restore point** first.
 - **Game list** from `profiles/games.json` plus an **installed-games scan** of
   Steam, Xbox/Game Pass, Epic, GOG, and a catch-all Windows registry + Start-menu
   sweep (covers EA, Ubisoft, Battle.net and standalone installers).

@@ -29,6 +29,8 @@ DEFAULTS: Dict[str, Any] = {
     "minimize_to_tray": True,
     "enable_hotkey": True,
     "enable_pcgamingwiki": True,
+    "theme": "dark",                  # "dark" or "light"
+    "device_override": None,          # force "ROG Ally" / "ROG Ally X" if mis-detected
     # Safety clamps (watts) sent to RyzenAdj. The Z2/Z2 Extreme is comfortable
     # in roughly this band; clamp keeps a bad profile from doing harm.
     "min_tdp": 5,
