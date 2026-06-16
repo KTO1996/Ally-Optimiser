@@ -99,6 +99,21 @@ The exe is built with `uac_admin`, so Windows asks for Administrator rights on
 launch — that's required for RyzenAdj. SmartScreen may warn about your freshly
 built, unsigned exe (same as RyzenAdj); that's expected for an unsigned binary.
 
+### Or download a pre-built exe (no Python needed)
+
+A GitHub Actions workflow builds the exe on a Windows runner automatically:
+
+- **Every push to `main`** uploads `AllyOptimizer-windows.zip` as a build
+  artifact (Actions tab → latest run → Artifacts).
+- **Tagging a release** publishes a GitHub Release with the zip attached:
+
+  ```sh
+  git tag v1.0.0 && git push origin v1.0.0
+  ```
+
+Download the zip on the Ally, unzip it, drop `ryzenadj.exe` in the folder, and
+double-click `AllyOptimizer.exe`. No Python install required.
+
 ## Run from source (for development)
 
 ```sh
