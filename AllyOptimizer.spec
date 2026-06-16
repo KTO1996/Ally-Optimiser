@@ -12,7 +12,13 @@ stay user-editable. RyzenAdj is NOT bundled — point config.json at it, or
 drop ryzenadj.exe in the same folder as the built exe.
 """
 
+from PyInstaller.utils.hooks import collect_data_files
+
 block_cipher = None
+
+# CustomTkinter ships its theme JSON / assets as data files that must travel
+# with the exe, or the UI fails to load at runtime.
+_ctk_datas = collect_data_files("customtkinter")
 
 a = Analysis(
     ['main.py'],
@@ -20,9 +26,9 @@ a = Analysis(
     binaries=[],
     # Ship the seed profiles alongside the exe (kept editable, not embedded)
     # and bundle the icon/screenshot assets used by the window + tray.
-    datas=[('profiles', 'profiles'), ('assets', 'assets')],
+    datas=[('profiles', 'profiles'), ('assets', 'assets')] + _ctk_datas,
     # pystray picks a backend at runtime; include the Windows one explicitly.
-    hiddenimports=['pystray._win32'],
+    hiddenimports=['pystray._win32', 'customtkinter'],
     hookspath=[],
     runtime_hooks=[],
     excludes=[],

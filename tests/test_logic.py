@@ -17,6 +17,8 @@ from app import weblinks  # noqa: E402
 from app import sysinfo  # noqa: E402
 from app import systweaks  # noqa: E402
 from app import armoury  # noqa: E402
+from app import boost  # noqa: E402
+from app import hibernate  # noqa: E402
 from app.tweakengine import TweakEngine  # noqa: E402
 
 
@@ -151,6 +153,46 @@ def test_armoury_checklist_and_links():
     links = armoury.deep_links()
     assert any(l.kind == "app" for l in links)    # launch Armoury Crate
     assert any(l.target.startswith("ms-settings:") for l in links)
+
+
+def test_boost_native_guides():
+    guides = boost.native_boost_guides()
+    titles = " ".join(g.title for g in guides)
+    assert "AFMF" in titles and "RSR" in titles and "FSR" in titles
+    assert any(g.native for g in guides)
+    assert any(not g.native for g in guides)   # Lossless Scaling is third-party
+
+
+def test_boost_detect_lossless_scaling(tmp_path=None):
+    with tempfile.TemporaryDirectory() as tmp:
+        steamapps = os.path.join(tmp, "steamapps")
+        common = os.path.join(steamapps, "common")
+        os.makedirs(common)
+        # Absent first.
+        assert boost.detect_lossless_scaling([common]).installed is False
+        # Present once the manifest exists.
+        open(os.path.join(steamapps, f"appmanifest_{boost.LOSSLESS_SCALING_APPID}.acf"),
+             "w").close()
+        st = boost.detect_lossless_scaling([common])
+        assert st.installed is True and st.path.startswith("steam://")
+
+
+def test_boost_fse_dry_run():
+    res = boost.set_fse(r"C:\Games\game.exe", True, dry_run=True)
+    assert res.ok and res.dry_run
+    assert any("game.exe" in a for a in res.actions)
+
+
+def test_hibernate_commands_dry_run():
+    assert hibernate.set_enabled(True, dry_run=True).actions == ["powercfg /hibernate on"]
+    assert hibernate.set_enabled(False, dry_run=True).actions == ["powercfg /hibernate off"]
+    r = hibernate.set_auto_hibernate_timeout(30, dry_run=True)
+    assert r.ok and any("30" in a for a in r.actions)
+    assert hibernate.hibernate_now(dry_run=True).actions == ["shutdown /h"]
+    pb = hibernate.set_power_button_hibernate(dry_run=True)
+    # Each button action is set to index 2 (hibernate) via powercfg.
+    assert pb.ok and all("powercfg" in a for a in pb.actions)
+    assert any(a.endswith(hibernate.ACTION_HIBERNATE) for a in pb.actions)
 
 
 def _run_all():

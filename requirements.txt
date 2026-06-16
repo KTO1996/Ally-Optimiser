@@ -2,9 +2,10 @@
 # Standard library is used for json, subprocess, ctypes, webbrowser, urllib,
 # sqlite3 and tkinter (Tkinter ships with the python.org Windows installer).
 
+customtkinter>=5.2  # modern themed GUI widgets (dark/light)
 psutil>=5.9        # battery %, plugged state, CPU temperature
 pystray>=0.19      # system tray icon / minimize-to-tray (optional)
-Pillow>=10.0       # icon image for pystray (optional)
+Pillow>=10.0       # icon image for pystray + sidebar logo
 keyboard>=0.13     # global reapply-last-profile hotkey (optional, Windows)
 
 # RyzenAdj is NOT a pip package and is NOT bundled. Download it separately

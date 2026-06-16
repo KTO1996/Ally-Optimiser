@@ -31,6 +31,8 @@ DEFAULTS: Dict[str, Any] = {
     "enable_pcgamingwiki": True,
     "theme": "dark",                  # "dark" or "light"
     "device_override": None,          # force "ROG Ally" / "ROG Ally X" if mis-detected
+    "anyfse_path": None,              # optional path to AnyFSE.exe for the Boost tab
+    "auto_hibernate_minutes": 30,     # default timeout for the auto-hibernate control
     # Safety clamps (watts) sent to RyzenAdj. The Z2/Z2 Extreme is comfortable
     # in roughly this band; clamp keeps a bad profile from doing harm.
     "min_tdp": 5,

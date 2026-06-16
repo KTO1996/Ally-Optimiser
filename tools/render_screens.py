@@ -1,7 +1,7 @@
-"""Headless render of the GUI tabs in both themes (for review screenshots).
+"""Headless render of the GUI pages in both themes (for review screenshots).
 
 Run under a virtual display, e.g.:
-    xvfb-run -s "-screen 0 1000x760x24" /usr/bin/python3.12 tools/render_screens.py
+    xvfb-run -s "-screen 0 1100x740x24" /usr/bin/python3.12 tools/render_screens.py
 """
 import os
 import sys
@@ -18,45 +18,43 @@ gui.AllyOptimizerApp._setup_tray = lambda self: None
 gui.AllyOptimizerApp._setup_hotkey = lambda self: None
 
 OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
-W, H = 960, 640
+W, H = 1040, 680
+PAGES = list(gui.NAV_ITEMS)
 
 
 def shot(app, path):
     app.update_idletasks()
     app.update()
-    time.sleep(0.4)
+    time.sleep(0.5)
     app.update()
     ImageGrab.grab(bbox=(0, 0, W, H)).save(path)
     print("wrote", path)
 
 
-def select_game(app):
-    if app.listbox.size():
-        app.listbox.selection_clear(0, "end")
-        app.listbox.selection_set(0)
-        app.selected_game = app._entry_to_name(app.listbox.get(0))
-        app._render_detail()
+def select_first_game(app):
+    entries = app._all_entries()
+    if entries:
+        app._select_game(app._entry_to_name(entries[0]))
+
+
+def capture_all(app, tag):
+    for name in PAGES:
+        app._show_page(name)
+        if name == "Games":
+            select_first_game(app)
+        slug = name.lower().replace(" ", "")
+        shot(app, os.path.join(OUT, f"screenshot_{tag}_{slug}.png"))
 
 
 def main():
     app = gui.AllyOptimizerApp()
     app.geometry(f"{W}x{H}+0+0")
-    select_game(app)
+    capture_all(app, app.theme_mode)
 
-    for tab, label in ((app.tab_games, "games"),
-                        (app.tab_tweaks, "tweaks"),
-                        (app.tab_armoury, "armoury")):
-        app.notebook.select(tab)
-        shot(app, os.path.join(OUT, f"screenshot_{app.theme_mode}_{label}.png"))
-
-    # Toggle to light and capture the same tabs.
+    # Toggle to the other theme and recapture.
+    app.theme_switch.select() if app.theme_mode == "dark" else app.theme_switch.deselect()
     app._toggle_theme()
-    select_game(app)
-    for tab, label in ((app.tab_games, "games"),
-                        (app.tab_tweaks, "tweaks"),
-                        (app.tab_armoury, "armoury")):
-        app.notebook.select(tab)
-        shot(app, os.path.join(OUT, f"screenshot_{app.theme_mode}_{label}.png"))
+    capture_all(app, app.theme_mode)
 
     app.destroy()
 
