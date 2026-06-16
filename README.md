@@ -68,7 +68,38 @@ APU power limits is also why admin rights are needed.
 > ⚠️ Changing power limits affects your hardware. The clamp keeps values in a
 > sane band, but use sensible numbers. This tool is provided as-is.
 
-## Usage
+## Build a standalone .exe (recommended for the Ally)
+
+So you can just double-click an icon on the Ally instead of running Python, build
+a standalone `AllyOptimizer.exe` with [PyInstaller](https://pyinstaller.org).
+
+> A Windows `.exe` must be built **on Windows** (PyInstaller can't cross-compile).
+> Build it once on the Ally itself, or on any Windows PC, then copy the folder.
+
+```bat
+build_exe.bat
+```
+
+That installs the dependencies + PyInstaller and runs the bundled
+`AllyOptimizer.spec`. When it finishes you'll have:
+
+```
+dist\AllyOptimizer\AllyOptimizer.exe
+dist\AllyOptimizer\profiles\        (your editable games.json / config.json)
+```
+
+Then:
+
+1. Drop `ryzenadj.exe` into `dist\AllyOptimizer\` (or point the app at it via the
+   **RyzenAdj…** button).
+2. Right-click `AllyOptimizer.exe` → **Send to → Desktop (create shortcut)**, or
+   pin it to Start. Double-click to launch (it'll prompt for admin via UAC).
+
+The exe is built with `uac_admin`, so Windows asks for Administrator rights on
+launch — that's required for RyzenAdj. SmartScreen may warn about your freshly
+built, unsigned exe (same as RyzenAdj); that's expected for an unsigned binary.
+
+## Run from source (for development)
 
 ```sh
 pip install -r requirements.txt
