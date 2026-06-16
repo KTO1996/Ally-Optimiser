@@ -4,6 +4,7 @@ __pycache__/
 build/
 dist/
 *.spec
+!AllyOptimizer.spec
 .venv/
 venv/
 # Local runtime artifacts
