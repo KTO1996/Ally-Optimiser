@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.tmp
+build/
+dist/
+*.spec
+.venv/
+venv/
+# Local runtime artifacts
+profiles/pcgw_cache.json
+ryzenadj.exe
+ryzenadj*/

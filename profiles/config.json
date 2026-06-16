@@ -1,0 +1,10 @@
+{
+  "ryzenadj_path": "ryzenadj.exe",
+  "steam_library_paths": [
+    "C:\\Program Files (x86)\\Steam\\steamapps\\common"
+  ],
+  "extra_library_paths": [],
+  "battery_default_tdp": 12,
+  "plugged_default_tdp": 25,
+  "rogallylife_base_url": "https://rogallylife.com/?s="
+}
