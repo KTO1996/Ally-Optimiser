@@ -88,6 +88,35 @@ APU power limits is also why admin rights are needed.
 > ⚠️ Changing power limits affects your hardware. The clamp keeps values in a
 > sane band, but use sensible numbers. This tool is provided as-is.
 
+## First run on the Ally — sanity check
+
+The logic, UI and read-only Windows calls are validated automatically on a
+Windows CI runner, but the parts that actually touch hardware can only be
+confirmed on the device. Run through this once on your Ally:
+
+1. **Launch & elevate** — start the app, accept the UAC prompt. The sidebar
+   should show your model (e.g. *ROG Ally X*) and the status bar should show a
+   real battery % / plugged state. _(If the model says "Unknown handheld", set
+   `device_override` in `profiles/config.json` to `"ROG Ally"` or `"ROG Ally X"`.)_
+2. **TDP apply (RyzenAdj)** — point the app at `ryzenadj.exe`, pick a game, and
+   Apply a profile. Confirm it reports success (not dry-run). Sanity-check the
+   wattage actually changed in your monitoring overlay / Armoury Crate.
+3. **One tweak + revert** — on **System Tweaks**, click **🛡 Create restore
+   point** first, then Apply a single *SAFE* tweak (e.g. *Disable hibernation*),
+   confirm the "● applied" badge, then **Revert** and confirm it clears. This
+   proves the apply→record→revert round-trip works on your machine.
+4. **Hibernation** — on the **Hibernation** page, check the state line reads
+   correctly, try **Buttons → hibernate** then **Buttons → sleep** to confirm
+   both directions work. *(Test "Hibernate now" only when you're ready for the
+   Ally to actually hibernate.)*
+5. **Boost / FSE** — pick a game's `.exe` with **Force FSE for .exe…**, then
+   **Remove FSE for .exe…**, to confirm the per-game Fullscreen-Exclusive toggle
+   writes and clears. AFMF/RSR/FSR are guidance — enable those in AMD Software.
+
+If any **write** action fails, it'll surface the exact command and error rather
+than failing silently — note that down so it can be fixed. Everything is
+reversible, and the restore point from step 3 is your safety net.
+
 ## Build a standalone .exe (recommended for the Ally)
 
 So you can just double-click an icon on the Ally instead of running Python, build
