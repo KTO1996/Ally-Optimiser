@@ -21,6 +21,7 @@ from typing import Optional
 from .paths import PROFILES_DIR
 
 COVERS_DIR = os.path.join(PROFILES_DIR, "covers")
+PLACEHOLDERS_DIR = os.path.join(COVERS_DIR, "placeholders")
 _UA = {"User-Agent": "AllyOptimizer/1.0 (personal use)"}
 _TIMEOUT = 12
 
@@ -95,3 +96,67 @@ def cached_cover(game: Optional[dict]) -> Optional[str]:
     if cover and not is_url(cover) and os.path.isfile(cover):
         return cover
     return None
+
+
+def _wrap(draw, text: str, font, max_width: int):
+    words, lines, cur = text.split(), [], ""
+    for w in words:
+        trial = (cur + " " + w).strip()
+        if draw.textbbox((0, 0), trial, font=font)[2] <= max_width:
+            cur = trial
+        else:
+            if cur:
+                lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return lines or [text]
+
+
+def placeholder_for(name: str, grey: bool = False) -> Optional[str]:
+    """Generate (and cache) a simple gradient placeholder with the game name.
+
+    A red (ROG) or grey vertical gradient box with the game's name centred —
+    enough to tell games apart when no real cover is available. Returns None if
+    Pillow isn't installed (the UI then falls back to text).
+    """
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except Exception:
+        return None
+    key = hashlib.sha1((f"ph::{grey}::" + name).encode("utf-8")).hexdigest()[:16]
+    dest = os.path.join(PLACEHOLDERS_DIR, key + ".png")
+    if os.path.isfile(dest):
+        return dest
+    try:
+        os.makedirs(PLACEHOLDERS_DIR, exist_ok=True)
+        W, H = 600, 900
+        top, bot = ((70, 72, 78), (28, 28, 32)) if grey else ((150, 24, 30), (28, 10, 12))
+        img = Image.new("RGB", (W, H))
+        d = ImageDraw.Draw(img)
+        for y in range(H):
+            t = y / H
+            d.line([(0, y), (W, y)],
+                   fill=tuple(int(top[i] + (bot[i] - top[i]) * t) for i in range(3)))
+
+        def _font(size):
+            for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                         "C:\\Windows\\Fonts\\segoeuib.ttf",
+                         "C:\\Windows\\Fonts\\arialbd.ttf"):
+                if os.path.isfile(path):
+                    return ImageFont.truetype(path, size)
+            return ImageFont.load_default()
+
+        font = _font(54)
+        lines = _wrap(d, name, font, W - 80)
+        line_h = d.textbbox((0, 0), "Ag", font=font)[3] + 12
+        y = (H - line_h * len(lines)) / 2
+        for line in lines:
+            w = d.textbbox((0, 0), line, font=font)[2]
+            d.text(((W - w) / 2, y), line, fill=(245, 245, 248), font=font)
+            y += line_h
+        d.rectangle([0, 0, W - 1, H - 1], outline=(44, 44, 52), width=6)
+        img.save(dest, "PNG")
+        return dest
+    except Exception:
+        return None

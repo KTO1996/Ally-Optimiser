@@ -65,6 +65,13 @@ def capture_all(app, tag):
 def main():
     app = gui.AllyOptimizerApp()
     app.geometry(f"{W}x{H}+0+0")
+
+    # Grid with generated placeholders (no real covers) to show the fallback.
+    app.library_view = "grid"
+    app._show_page("Games")
+    shot(app, os.path.join(OUT, "screenshot_dark_grid_placeholders.png"))
+    app.library_view = "list"
+
     inject_sample_covers(app)
     capture_all(app, app.theme_mode)
 

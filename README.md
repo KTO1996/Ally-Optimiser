@@ -49,9 +49,11 @@ app with a modern dark/light, ROG red/black UI.
 
 Extras: **auto-apply on game launch** (and reset on exit), **quick presets**
 (Silent/Balanced/Turbo/Max scaled to your model), **battery-life estimates**,
-**list/grid library** with cover art, a **TDP slider**, optional **display-
-resolution apply**, **config export/import**, an **update checker**, and a
-first-run **welcome** guide.
+**list/grid library** with cover art (and generated **placeholder art** when no
+cover is found), a **TDP slider**, optional **display-resolution apply**,
+**config export/import**, an **update checker**, **gamepad navigation** (Xbox
+controller: D-pad to move, A to select, LB/RB to switch tabs), and a first-run
+**welcome** guide.
 
 ## Features
 

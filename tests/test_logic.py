@@ -27,6 +27,7 @@ from app import updates  # noqa: E402
 from app import backup  # noqa: E402
 from app import watcher  # noqa: E402
 from app import display  # noqa: E402
+from app import gamepad  # noqa: E402
 from app.tweakengine import TweakEngine  # noqa: E402
 
 
@@ -311,6 +312,41 @@ def test_display_parse_resolution():
     assert display.parse_resolution("1920x1080") == (1920, 1080)
     assert display.parse_resolution("1280 x 720") == (1280, 720)
     assert display.parse_resolution("nonsense") is None
+
+
+def test_gamepad_decode_and_actions():
+    # A + D-pad down pressed together.
+    pressed = gamepad.decode(gamepad.BUTTONS["a"] | gamepad.BUTTONS["dpad_down"])
+    assert pressed == {"a", "dpad_down"}
+    actions = gamepad.actions_from(pressed)
+    assert actions == {"activate", "down"}
+
+
+def test_gamepad_stick_directions():
+    assert gamepad.stick_directions(0, 0) == set()
+    assert "dpad_right" in gamepad.stick_directions(30000, 0)
+    assert "dpad_up" in gamepad.stick_directions(0, 30000)
+    assert "dpad_down" in gamepad.stick_directions(0, -30000)
+
+
+def test_gamepad_edge_and_index():
+    assert gamepad.newly_pressed({"a"}, {"a", "b"}) == {"b"}
+    assert gamepad.newly_pressed({"a"}, {"a"}) == set()
+    assert gamepad.next_index(2, 1, 3) == 0      # wrap forward
+    assert gamepad.next_index(0, -1, 3) == 2     # wrap back
+    assert gamepad.next_index(0, 1, 0) == 0      # empty list safe
+
+
+def test_placeholder_cover_generation():
+    import tempfile
+    from app import covers as cv
+    with tempfile.TemporaryDirectory() as tmp:
+        cv.PLACEHOLDERS_DIR = os.path.join(tmp, "ph")
+        path = cv.placeholder_for("Forza Horizon 6")
+        # Pillow is available in this test env; if not, skip gracefully.
+        if path is not None:
+            assert os.path.isfile(path)
+            assert cv.placeholder_for("Forza Horizon 6") == path  # cached
 
 
 def _run_all():

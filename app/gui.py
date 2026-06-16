@@ -22,7 +22,7 @@ from typing import Callable, Dict, List, Optional
 import customtkinter as ctk
 
 from . import APP_NAME, __version__, armoury, backup, batteryest, boost, config as cfg
-from . import covers, display, hibernate, importer, pcgamingwiki, power
+from . import covers, display, gamepad, hibernate, importer, pcgamingwiki, power
 from . import presets, profiles as prof, ryzenadj, sysinfo, updates, weblinks
 from . import systweaks as st
 from .watcher import GameWatcher, process_name_map
@@ -83,6 +83,10 @@ class AllyOptimizerApp(ctk.CTk):
             get_proc_map=lambda: process_name_map(self.games_doc),
             on_start=lambda g: self.after(0, lambda: self._auto_apply(g)),
             on_stop=lambda g: self.after(0, lambda: self._auto_revert(g)))
+        self.pad = gamepad.GamepadPoller(
+            on_action=lambda a: self.after(0, lambda: self._gamepad_action(a)))
+        self._focusables: List = []
+        self._focus_idx: int = 0
 
         self._build_shell()
         self._show_page("Games")
@@ -90,6 +94,7 @@ class AllyOptimizerApp(ctk.CTk):
         self._setup_hotkey()
         self._setup_tray()
         self._setup_watcher()
+        self._setup_gamepad()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(400, self._maybe_onboard)
 
@@ -254,6 +259,8 @@ class AllyOptimizerApp(ctk.CTk):
             "Settings": self._page_settings,
         }[name]
         builder()
+        if self.config_data.get("enable_gamepad"):
+            self.after(50, self._refresh_focusables)
 
     def _header_title(self, title: str, subtitle: str = "") -> None:
         ctk.CTkLabel(self.header, text=title,
@@ -311,7 +318,7 @@ class AllyOptimizerApp(ctk.CTk):
             tile.grid(row=i // cols, column=i % cols, padx=8, pady=8, sticky="n")
             game = prof.find_game(self.games_doc, name)
             cover_lbl = ctk.CTkLabel(tile, text="", width=150, height=225)
-            cached = covers.cached_cover(game)
+            cached = covers.cached_cover(game) or covers.placeholder_for(name)
             img = self._cover_image(cached, (150, 225)) if cached else None
             if img is not None:
                 cover_lbl.configure(image=img)
@@ -346,8 +353,9 @@ class AllyOptimizerApp(ctk.CTk):
         for entry in self._all_entries():
             name = self._entry_to_name(entry)
             active = name == self.selected_game
-            # Show a small cached thumbnail if we already have local art.
-            thumb = self._cover_image(covers.cached_cover(prof.find_game(self.games_doc, name)),
+            # Small thumbnail: real art if cached, else a generated placeholder.
+            g = prof.find_game(self.games_doc, name)
+            thumb = self._cover_image(covers.cached_cover(g) or covers.placeholder_for(name),
                                       (22, 33))
             ctk.CTkButton(
                 self.game_list, text=entry, anchor="w", corner_radius=6,
@@ -376,7 +384,7 @@ class AllyOptimizerApp(ctk.CTk):
         head = ctk.CTkFrame(self.detail, fg_color="transparent")
         head.pack(fill="x", anchor="w")
         cover_label = ctk.CTkLabel(head, text="", width=150)
-        cached = covers.cached_cover(game)
+        cached = covers.cached_cover(game) or covers.placeholder_for(name)
         img = self._cover_image(cached, (150, 225)) if cached else None
         if img is not None:
             cover_label.configure(image=img)
@@ -909,6 +917,15 @@ class AllyOptimizerApp(ctk.CTk):
                          text_color="gray60", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=12)
         self._toggle_row(card, "enable_hotkey", "Global hotkey to reapply last profile")
         self._toggle_row(card, "minimize_to_tray", "Minimise to system tray on close")
+        self.gamepad_switch = ctk.CTkSwitch(
+            card, text="Gamepad navigation (Xbox controller: D-pad move, A select, "
+            "LB/RB switch tabs)", progress_color=ACCENT, command=self._toggle_gamepad)
+        if self.config_data.get("enable_gamepad"):
+            self.gamepad_switch.select()
+        self.gamepad_switch.pack(anchor="w", padx=12, pady=2)
+        if not self.pad.available():
+            ctk.CTkLabel(card, text="(no controller / XInput unavailable here)",
+                         text_color="gray60", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=12)
         ctk.CTkLabel(card, text="", height=4).pack()
 
         # --- Hardware / paths ---
@@ -1062,6 +1079,93 @@ class AllyOptimizerApp(ctk.CTk):
         cfg.save_config(self.config_data)
         WelcomeDialog(self)
 
+    # ------------------------------------------------------ gamepad nav ------
+    def _setup_gamepad(self) -> None:
+        if self.config_data.get("enable_gamepad") and self.pad.available():
+            self.pad.start()
+            self._refresh_focusables()
+
+    def _toggle_gamepad(self) -> None:
+        on = bool(self.gamepad_switch.get())
+        self.config_data["enable_gamepad"] = on
+        cfg.save_config(self.config_data)
+        if on and self.pad.available():
+            self.pad.start()
+            self._refresh_focusables()
+        else:
+            self.pad.stop()
+
+    def _walk_focusables(self, widget, out: List) -> None:
+        focus_types = (ctk.CTkButton, ctk.CTkSwitch, ctk.CTkSegmentedButton,
+                       ctk.CTkOptionMenu)
+        for child in widget.winfo_children():
+            if isinstance(child, focus_types):
+                out.append(child)
+            self._walk_focusables(child, out)
+
+    def _refresh_focusables(self) -> None:
+        items: List = list(self.nav_buttons.values())
+        self._walk_focusables(self.header, items)
+        self._walk_focusables(self.body, items)
+        self._focusables = [w for w in items if w.winfo_exists()]
+        self._focus_idx = min(self._focus_idx, max(0, len(self._focusables) - 1))
+        self._highlight_focus()
+
+    def _highlight_focus(self) -> None:
+        for i, w in enumerate(self._focusables):
+            try:
+                if i == self._focus_idx:
+                    w.configure(border_width=3, border_color="#ffd400")
+                else:
+                    # Leave accent/ghost borders alone; only clear our highlight.
+                    if str(w.cget("border_color")) == "#ffd400":
+                        w.configure(border_width=0)
+            except Exception:
+                continue
+
+    def _gamepad_action(self, action: str) -> None:
+        if not self.config_data.get("enable_gamepad") or not self._focusables:
+            if action in ("next_tab", "prev_tab"):
+                pass
+            else:
+                return
+        if action in ("down", "right"):
+            self._focus_idx = gamepad.next_index(self._focus_idx, 1, len(self._focusables))
+            self._highlight_focus()
+            self._scroll_into_view()
+        elif action in ("up", "left"):
+            self._focus_idx = gamepad.next_index(self._focus_idx, -1, len(self._focusables))
+            self._highlight_focus()
+            self._scroll_into_view()
+        elif action == "activate":
+            self._activate_focused()
+        elif action == "back":
+            self._show_page("Games")
+        elif action in ("next_tab", "prev_tab"):
+            order = list(NAV_ITEMS)
+            cur = order.index(self.active_page) if self.active_page in order else 0
+            self._show_page(order[(cur + (1 if action == "next_tab" else -1)) % len(order)])
+
+    def _activate_focused(self) -> None:
+        if not (0 <= self._focus_idx < len(self._focusables)):
+            return
+        w = self._focusables[self._focus_idx]
+        try:
+            if isinstance(w, ctk.CTkButton):
+                cmd = getattr(w, "_command", None)
+                if cmd:
+                    cmd()
+            elif isinstance(w, ctk.CTkSwitch):
+                w.toggle()
+        except Exception:
+            pass
+
+    def _scroll_into_view(self) -> None:
+        try:
+            self._focusables[self._focus_idx].focus_set()
+        except Exception:
+            pass
+
     # ----------------------------------------------------------- lifecycle --
     def _toggle_theme(self) -> None:
         self.theme_mode = "light" if self.theme_switch.get() else "dark"
@@ -1105,6 +1209,7 @@ class AllyOptimizerApp(ctk.CTk):
         if self.tray is not None:
             self.tray.stop()
         self.watcher.stop()
+        self.pad.stop()
         self.destroy()
 
 
