@@ -60,3 +60,29 @@ jobs:
         with:
           tag_name: ${{ github.event.inputs.version || github.ref_name }}
           files: AllyOptimizer-windows.zip
+          body: |
+            ## Ally Optimizer — ROG Xbox Ally / Ally X optimiser
+
+            One app for tuning your Ally: per-game TDP profiles (RyzenAdj),
+            reversible Windows tweaks, FPS boosters (AFMF/RSR/FSR + Fullscreen
+            Exclusive), and hibernation fixes for the overnight battery drain.
+            Dark/light themed UI. Auto-detects Ally vs Ally X.
+
+            ### Install
+            1. Download **AllyOptimizer-windows.zip** below and unzip it.
+            2. Drop `ryzenadj.exe` into the folder (or point the app at it). See
+               the [RyzenAdj setup](https://github.com/KTO1996/Ally-Optimiser#ryzenadj-setup-required-not-bundled).
+            3. Double-click **AllyOptimizer.exe** and accept the admin prompt.
+
+            ### Before you start
+            - **SmartScreen will warn** — the exe is unsigned, so Windows shows an
+              "unrecognised publisher" prompt. Choose *More info → Run anyway* if
+              you trust it. The app does not try to suppress that warning.
+            - **Run the on-device sanity check** the first time:
+              [First run on the Ally](https://github.com/KTO1996/Ally-Optimiser#first-run-on-the-ally--sanity-check).
+              Everything is reversible and the app can make a System Restore point
+              before any tweak.
+
+            > The UI + read-only logic are tested on a Windows CI runner; the
+            > hardware-touching actions (TDP, powercfg, FSE) are best confirmed on
+            > the device via the checklist above.

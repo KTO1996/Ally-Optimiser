@@ -1,13 +1,28 @@
-# Ally Optimizer
+<p align="center">
+  <img src="assets/allyoptimizer.png" width="96" alt="Ally Optimizer icon">
+</p>
+
+<h1 align="center">Ally Optimizer</h1>
 
 A one-click optimiser for the **ROG Xbox Ally** and **ROG Xbox Ally X**
 (AMD Z2 / Z2 Extreme APU) on Windows 11. Set per-game TDP profiles, apply the
-Windows tweaks people recommend for handhelds (reversibly), and follow a guided
-Armoury Crate checklist — all from one app with a ROG red/black theme.
+Windows tweaks people recommend for handhelds (reversibly), boost FPS, fix the
+overnight sleep drain, and follow a guided Armoury Crate checklist — all from one
+app with a modern dark/light, ROG red/black UI.
 
-| Dark | Light |
+### Screenshots
+
+| Games | System Tweaks |
 | --- | --- |
-| ![Dark theme — System Tweaks](assets/screenshot_dark_tweaks.png) | ![Light theme — Armoury Crate](assets/screenshot_light_armoury.png) |
+| ![Games](assets/screenshot_dark_games.png) | ![System Tweaks](assets/screenshot_dark_systemtweaks.png) |
+
+| Boost | Hibernation |
+| --- | --- |
+| ![Boost](assets/screenshot_dark_boost.png) | ![Hibernation](assets/screenshot_dark_hibernation.png) |
+
+| Armoury Crate | Light theme |
+| --- | --- |
+| ![Armoury Crate](assets/screenshot_dark_armourycrate.png) | ![Light theme](assets/screenshot_light_hibernation.png) |
 
 ## Tabs
 
@@ -15,6 +30,10 @@ Armoury Crate checklist — all from one app with a ROG red/black theme.
   [RyzenAdj](https://github.com/FlyGoat/RyzenAdj).
 - **System Tweaks** — reversible Windows optimisation tweaks (power, gaming,
   latency, visuals, debloat) with risk badges and one-click revert.
+- **Boost** — native AMD AFMF/RSR/FSR guidance, a per-game Fullscreen-Exclusive
+  toggle, and detect/launch for Lossless Scaling + AnyFSE.
+- **Hibernation** — enable/disable, hibernate-instead-of-sleep, auto-hibernate
+  timeout, and hibernate-now (fixes overnight battery drain).
 - **Armoury Crate** — guided checklist + deep links (Armoury Crate has no public
   API, so these can't be toggled directly).
 
