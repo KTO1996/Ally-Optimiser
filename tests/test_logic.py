@@ -19,6 +19,8 @@ from app import systweaks  # noqa: E402
 from app import armoury  # noqa: E402
 from app import boost  # noqa: E402
 from app import hibernate  # noqa: E402
+from app import importer  # noqa: E402
+from app import covers  # noqa: E402
 from app.tweakengine import TweakEngine  # noqa: E402
 
 
@@ -193,6 +195,53 @@ def test_hibernate_commands_dry_run():
     # Each button action is set to index 2 (hibernate) via powercfg.
     assert pb.ok and all("powercfg" in a for a in pb.actions)
     assert any(a.endswith(hibernate.ACTION_HIBERNATE) for a in pb.actions)
+
+
+def test_importer_parse_text():
+    f = importer.parse_settings_text(
+        "Recommended: TDP sustained 15W, boost 20W, 1280x720, 60 fps (Performance)")
+    assert f["tdp_sustained"] == 15 and f["tdp_boost"] == 20
+    assert f["resolution"] == "1280x720" and f["fps_cap"] == 60
+    assert f.get("label") == "Performance"
+
+
+def test_importer_parse_slash_and_words():
+    f = importer.parse_settings_text("Set 18/25 W at 1080p, cap 90fps")
+    assert f["tdp_sustained"] == 18 and f["tdp_boost"] == 25
+    assert f["resolution"] == "1920x1080" and f["fps_cap"] == 90
+
+
+def test_importer_url_detection_and_warning():
+    assert importer.is_url("https://www.pcgamingwiki.com/wiki/Doom")
+    assert importer.needs_fetch_warning("https://rogallylife.com/some-game") is True
+    # PCGamingWiki uses the API path, not a raw fetch -> no scrape warning.
+    assert importer.needs_fetch_warning("https://www.pcgamingwiki.com/wiki/Doom") is False
+    assert importer.needs_fetch_warning("just pasted text") is False
+
+
+def test_importer_empty_input():
+    assert importer.import_from_input("", {}).ok is False
+
+
+def test_validate_profile_flags_out_of_range():
+    # 1440p / 144fps / 45W on a base Ally should all warn.
+    bad = {"tdp_sustained": 45, "tdp_boost": 40, "resolution": "2560x1440", "fps_cap": 144}
+    warns = sysinfo.validate_profile(bad, sysinfo.ALLY)
+    text = " ".join(warns).lower()
+    assert "tdp" in text and "panel" in text and "fps" in text
+    assert any("boost" in w.lower() for w in warns)   # boost < sustained
+
+
+def test_validate_profile_ok_for_sane_values():
+    good = {"tdp_sustained": 15, "tdp_boost": 20, "resolution": "1920x1080", "fps_cap": 60}
+    assert sysinfo.validate_profile(good, sysinfo.ALLY) == []
+
+
+def test_covers_steam_urls_and_cached():
+    assert "library_600x900" in covers.steam_cover_url("620")
+    assert covers.is_url("https://example.com/a.jpg")
+    assert covers.is_url(r"C:\art\cover.jpg") is False
+    assert covers.cached_cover({"cover": "https://x/y.jpg"}) is None  # URL, not local
 
 
 def _run_all():

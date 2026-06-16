@@ -12,6 +12,7 @@ Model strings seen in the wild (board "Product" / system "Model"):
 """
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -47,6 +48,51 @@ class DeviceInfo:
         if not self.detected:
             return f"{self.model} (not auto-detected)"
         return f"{self.model}{ram}"
+
+
+# Both Ally and Ally X ship the same 7" 1080p120 panel.
+NATIVE_WIDTH = 1920
+NATIVE_HEIGHT = 1080
+PANEL_HZ = 120
+
+
+def validate_profile(profile: Dict, model: str) -> List[str]:
+    """Return human-readable warnings if a profile won't suit this console.
+
+    Pure function (no I/O) so it's unit-testable. An empty list means the
+    profile looks applicable to the detected handheld.
+    """
+    warnings: List[str] = []
+    band = TDP_PROFILES.get(model, TDP_PROFILES[UNKNOWN])
+    floor, ceil = band["silent"] - 5, band["max"]
+
+    sustained = profile.get("tdp_sustained")
+    boost = profile.get("tdp_boost")
+    if isinstance(sustained, (int, float)) and sustained > ceil:
+        warnings.append(f"Sustained TDP {sustained}W exceeds this model's ~{ceil}W ceiling.")
+    if isinstance(sustained, (int, float)) and sustained < max(3, floor):
+        warnings.append(f"Sustained TDP {sustained}W is unusually low for this model.")
+    if (isinstance(boost, (int, float)) and isinstance(sustained, (int, float))
+            and boost < sustained):
+        warnings.append("Boost TDP is below sustained — boost should be ≥ sustained.")
+    if isinstance(boost, (int, float)) and boost > ceil:
+        warnings.append(f"Boost TDP {boost}W exceeds this model's ~{ceil}W ceiling.")
+
+    res = profile.get("resolution")
+    if isinstance(res, str) and "x" in res.lower():
+        try:
+            w, h = (int(p) for p in re.split(r"[x×]", res.lower())[:2])
+            if w > NATIVE_WIDTH or h > NATIVE_HEIGHT:
+                warnings.append(f"{res} is above the Ally's native "
+                                f"{NATIVE_WIDTH}x{NATIVE_HEIGHT} panel.")
+        except ValueError:
+            pass
+
+    fps = profile.get("fps_cap")
+    if isinstance(fps, (int, float)) and fps > PANEL_HZ:
+        warnings.append(f"{fps} fps is above the {PANEL_HZ}Hz panel — cap at {PANEL_HZ}.")
+
+    return warnings
 
 
 def classify_model(raw_model: str, ram_gb: Optional[int] = None) -> str:

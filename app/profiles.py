@@ -63,13 +63,23 @@ def upsert_game(
     process_name: str,
     profiles: List[Dict[str, Any]],
     source: str = "manual entry",
+    cover: Optional[str] = None,
 ) -> None:
-    """Add or update a game entry in-place."""
-    doc.setdefault("games", {})[name] = {
+    """Add or update a game entry in-place.
+
+    Preserves an existing ``cover`` (local path or URL) unless a new one is
+    given, so editing a game doesn't drop its art.
+    """
+    games = doc.setdefault("games", {})
+    entry: Dict[str, Any] = {
         "process_name": process_name,
         "source": source,
         "profiles": profiles,
     }
+    existing_cover = games.get(name, {}).get("cover")
+    if cover or existing_cover:
+        entry["cover"] = cover or existing_cover
+    games[name] = entry
 
 
 def find_game(doc: Dict[str, Any], name: str) -> Optional[Dict[str, Any]]:

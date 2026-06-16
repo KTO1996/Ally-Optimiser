@@ -14,6 +14,7 @@ ROG red accent over CustomTkinter's dark/light appearance modes.
 from __future__ import annotations
 
 import os
+import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
 from typing import Callable, Dict, List, Optional
@@ -21,7 +22,7 @@ from typing import Callable, Dict, List, Optional
 import customtkinter as ctk
 
 from . import APP_NAME, __version__, armoury, boost, config as cfg
-from . import hibernate, pcgamingwiki, power, profiles as prof
+from . import covers, hibernate, importer, pcgamingwiki, power, profiles as prof
 from . import ryzenadj, sysinfo, weblinks
 from . import systweaks as st
 from .hotkey import HotkeyManager
@@ -66,6 +67,7 @@ class AllyOptimizerApp(ctk.CTk):
 
         self.games_doc: Dict = prof.load_games()
         self.detected: Dict[str, DetectedGame] = {}
+        self._img_refs: List = []          # keep CTkImage refs alive
         self.power_mode = ctk.StringVar(value="Auto")
         self.selected_game: Optional[str] = None
         self.active_page: str = "Games"
@@ -177,6 +179,47 @@ class AllyOptimizerApp(ctk.CTk):
     def _card(self, parent) -> ctk.CTkFrame:
         return ctk.CTkFrame(parent, corner_radius=10)
 
+    def _cover_image(self, path: str, size) -> Optional["ctk.CTkImage"]:
+        if Image is None or not path or not os.path.isfile(path):
+            return None
+        try:
+            img = ctk.CTkImage(Image.open(path), size=size)
+            self._img_refs.append(img)
+            return img
+        except Exception:
+            return None
+
+    def _load_cover_async(self, name: str, label: ctk.CTkLabel) -> None:
+        """Resolve a cover in the background; on success cache it + update UI."""
+        game = prof.find_game(self.games_doc, name)
+        det = self.detected.get(name)
+        appid = det.appid if det else None
+        if not (game and game.get("cover")) and not appid:
+            return
+
+        def work():
+            path = covers.resolve_cover(game, appid, allow_network=True)
+            if not path:
+                return
+            # Persist the local cover path so it shows instantly next time.
+            if game is not None and game.get("cover") != path:
+                prof.upsert_game(self.games_doc, name,
+                                 (game or {}).get("process_name", ""),
+                                 (game or {}).get("profiles", []),
+                                 source=(game or {}).get("source", "manual entry"),
+                                 cover=path)
+                prof.save_games(self.games_doc)
+            self.after(0, lambda: self._apply_cover(label, path, name))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply_cover(self, label: ctk.CTkLabel, path: str, name: str) -> None:
+        if self.selected_game != name or not label.winfo_exists():
+            return
+        img = self._cover_image(path, (150, 225))
+        if img is not None:
+            label.configure(image=img, text="")
+
     # -------------------------------------------------------- navigation ----
     def _show_page(self, name: str) -> None:
         self.active_page = name
@@ -246,8 +289,12 @@ class AllyOptimizerApp(ctk.CTk):
         for entry in self._all_entries():
             name = self._entry_to_name(entry)
             active = name == self.selected_game
+            # Show a small cached thumbnail if we already have local art.
+            thumb = self._cover_image(covers.cached_cover(prof.find_game(self.games_doc, name)),
+                                      (22, 33))
             ctk.CTkButton(
                 self.game_list, text=entry, anchor="w", corner_radius=6,
+                image=thumb, compound="left",
                 fg_color=ACCENT if active else "transparent",
                 text_color="white" if active else ("gray10", "gray90"),
                 hover_color=("gray80", "gray25"),
@@ -266,10 +313,24 @@ class AllyOptimizerApp(ctk.CTk):
             ctk.CTkLabel(self.detail, text="Select a game from the library.",
                          text_color="gray60").pack(anchor="w", pady=20)
             return
-        ctk.CTkLabel(self.detail, text=name,
-                     font=ctk.CTkFont(size=18, weight="bold")).pack(anchor="w")
         game = prof.find_game(self.games_doc, name)
-        self._add_find_settings(name)
+
+        # Header: cover art (left) + title/find-settings (right).
+        head = ctk.CTkFrame(self.detail, fg_color="transparent")
+        head.pack(fill="x", anchor="w")
+        cover_label = ctk.CTkLabel(head, text="", width=150)
+        cached = covers.cached_cover(game)
+        img = self._cover_image(cached, (150, 225)) if cached else None
+        if img is not None:
+            cover_label.configure(image=img)
+        cover_label.pack(side="left", padx=(0, 14), pady=(0, 6))
+        self._load_cover_async(name, cover_label)   # fetch/refresh in background
+
+        info = ctk.CTkFrame(head, fg_color="transparent")
+        info.pack(side="left", fill="x", expand=True, anchor="n")
+        ctk.CTkLabel(info, text=name,
+                     font=ctk.CTkFont(size=18, weight="bold")).pack(anchor="w")
+        self._add_find_settings(name, info)
 
         if not game or not game.get("profiles"):
             ctk.CTkLabel(self.detail, text="No saved profile for this game yet.",
@@ -309,17 +370,31 @@ class AllyOptimizerApp(ctk.CTk):
                             width=180).pack(side="left")
         ctk.CTkLabel(top, text=meta, text_color="gray60",
                      font=ctk.CTkFont(size=12)).pack(side="left", padx=12)
+
+        # Validate the profile against the detected console.
+        issues = sysinfo.validate_profile(profile, self.device.model)
+        if issues:
+            ctk.CTkLabel(top, text=" ⚠ check ", text_color=RISK_COLORS["aggressive"],
+                         font=ctk.CTkFont(size=11, weight="bold")).pack(side="right")
+            for w in issues:
+                ctk.CTkLabel(card, text="⚠ " + w, text_color=RISK_COLORS["aggressive"],
+                             font=ctk.CTkFont(size=11), justify="left",
+                             wraplength=560).pack(anchor="w", padx=12)
+        else:
+            ctk.CTkLabel(top, text=" ✓ fits ", text_color=RISK_COLORS["safe"],
+                         font=ctk.CTkFont(size=11, weight="bold")).pack(side="right")
         if profile.get("notes"):
             ctk.CTkLabel(card, text=profile["notes"], text_color="gray55",
                          font=ctk.CTkFont(size=11), justify="left",
                          wraplength=560).pack(anchor="w", padx=12, pady=(0, 10))
 
-    def _add_find_settings(self, name: str) -> None:
+    def _add_find_settings(self, name: str, parent=None) -> None:
+        parent = parent or self.detail
         links = weblinks.build_links(name, self.config_data)
         mapping = {label: url for label, url in links}
         var = ctk.StringVar(value="🔎 Find settings")
         ctk.CTkOptionMenu(
-            self.detail, variable=var, values=list(mapping.keys()),
+            parent, variable=var, values=list(mapping.keys()),
             width=200, fg_color=ACCENT, button_color=ACCENT_HOVER,
             button_hover_color=ACCENT_HOVER,
             command=lambda choice: weblinks.open_link(mapping[choice])).pack(
@@ -784,11 +859,27 @@ class EditGameDialog(ctk.CTkToplevel):
         super().__init__(app)
         self.app = app
         self.title("Edit game" if name else "Add game")
-        self.geometry("420x440")
+        self.geometry("440x620")
         self.transient(app)
         existing = prof.find_game(app.games_doc, name) if name else None
         first = (existing or {}).get("profiles", [{}])
         first = first[0] if first else {}
+        self.imported_cover: Optional[str] = None
+
+        # --- Import from link / text --------------------------------------- #
+        imp = ctk.CTkFrame(self, corner_radius=10)
+        imp.pack(fill="x", padx=12, pady=(12, 4))
+        ctk.CTkLabel(imp, text="Import from link or pasted settings",
+                     font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(8, 0))
+        self.import_box = ctk.CTkTextbox(imp, height=56, width=400)
+        self.import_box.pack(padx=10, pady=4)
+        ctk.CTkLabel(imp, text="Paste a PCGamingWiki link, any guide URL, or the "
+                     "settings text you copied. Some sites (ROG Ally Life, "
+                     "rogally.games) block automated fetch — paste the text if a "
+                     "link fails.", text_color="gray60", font=ctk.CTkFont(size=10),
+                     justify="left", wraplength=400).pack(anchor="w", padx=10)
+        ctk.CTkButton(imp, text="Import", command=self._import, fg_color=ACCENT,
+                      hover_color=ACCENT_HOVER, width=100).pack(anchor="w", padx=10, pady=(4, 10))
 
         self.vars: Dict[str, ctk.StringVar] = {}
         rows = [
@@ -815,6 +906,41 @@ class EditGameDialog(ctk.CTkToplevel):
         if name:
             self.vars["name"].set(name)
         self.after(50, self.lift)
+
+    def _import(self) -> None:
+        text = self.import_box.get("1.0", "end").strip()
+        if not text:
+            return
+        if importer.needs_fetch_warning(text):
+            if not messagebox.askyesno(
+                "Fetch a web page?",
+                "This will try to download that page and read settings from it.\n\n"
+                "Some community sites (ROG Ally Life, rogally.games) block "
+                "automated access and forbid scraping, so it may fail — in that "
+                "case, copy the settings text and paste that instead.\n\nContinue?",
+                parent=self):
+                return
+        self.configure(cursor="watch")
+        self.update_idletasks()
+        try:
+            result = importer.import_from_input(text, self.app.config_data)
+        finally:
+            self.configure(cursor="")
+        if not result.ok:
+            messagebox.showinfo("Import", result.message, parent=self)
+            return
+        # Populate only the fields we found; leave the rest as-is.
+        applied = []
+        for key in ("tdp_sustained", "tdp_boost", "resolution", "fps_cap", "label"):
+            if key in result.fields and key in self.vars:
+                self.vars[key].set(str(result.fields[key]))
+                applied.append(key)
+        if result.cover_url:
+            self.imported_cover = result.cover_url
+        msg = result.message + (f"\n\nFilled: {', '.join(applied)}." if applied else "")
+        if result.warning:
+            msg += "\n\n" + result.warning
+        messagebox.showinfo("Import", msg, parent=self)
 
     def _save(self) -> None:
         name = self.vars["name"].get().strip()
@@ -845,7 +971,8 @@ class EditGameDialog(ctk.CTkToplevel):
             profiles = [profile]
             source = "manual entry"
         prof.upsert_game(self.app.games_doc, name,
-                         self.vars["process_name"].get().strip(), profiles, source=source)
+                         self.vars["process_name"].get().strip(), profiles, source=source,
+                         cover=self.imported_cover)
         prof.save_games(self.app.games_doc)
         self.app.selected_game = name
         self.app._refresh_game_list()

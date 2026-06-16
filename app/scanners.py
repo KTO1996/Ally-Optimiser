@@ -39,6 +39,7 @@ class DetectedGame:
     name: str
     process_name: Optional[str]
     source: str
+    appid: Optional[str] = None   # Steam appid, when known (used for cover art)
 
 
 def _normalise(name: str) -> str:
@@ -67,7 +68,10 @@ def scan_steam(steamapps_common_paths: List[str]) -> List[DetectedGame]:
             name = m.group(1).strip()
             if _normalise(name) in _NON_GAME_NAMES:
                 continue
-            results.append(DetectedGame(name=name, process_name=None, source="Steam"))
+            appid_m = re.search(r'"appid"\s+"(\d+)"', text)
+            results.append(DetectedGame(
+                name=name, process_name=None, source="Steam",
+                appid=appid_m.group(1) if appid_m else None))
     return results
 
 

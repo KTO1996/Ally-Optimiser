@@ -27,7 +27,10 @@ app with a modern dark/light, ROG red/black UI.
 ## Tabs
 
 - **Games** — per-game power/performance profiles applied via
-  [RyzenAdj](https://github.com/FlyGoat/RyzenAdj).
+  [RyzenAdj](https://github.com/FlyGoat/RyzenAdj). Each game shows **cover art**
+  (auto-fetched for Steam titles), profiles are **validated against your console**
+  (TDP band, native 1080p panel, 120Hz cap) with ✓/⚠ badges, and you can
+  **import settings** by pasting a PCGamingWiki/guide link or copied text.
 - **System Tweaks** — reversible Windows optimisation tweaks (power, gaming,
   latency, visuals, debloat) with risk badges and one-click revert.
 - **Boost** — native AMD AFMF/RSR/FSR guidance, a per-game Fullscreen-Exclusive
