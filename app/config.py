@@ -40,6 +40,7 @@ DEFAULTS: Dict[str, Any] = {
     "scan_include_generic": False,    # also list every installed program (noisy)
     "scan_shortcuts": True,           # detect games from Desktop shortcuts
     "game_folders": [],               # extra folders to scan for non-launcher games
+    "ignored_games": [],              # names rejected in review — never re-added
     # Safety clamps (watts) sent to RyzenAdj. The Z2/Z2 Extreme is comfortable
     # in roughly this band; clamp keeps a bad profile from doing harm.
     "min_tdp": 5,

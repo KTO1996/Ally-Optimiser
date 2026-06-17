@@ -2,6 +2,17 @@
 
 All notable changes to Ally Optimizer. Dates are when the release was cut.
 
+## v1.9.0 — library management + review queue
+- **Review queue:** uncertain detections (from folders/shortcuts) are now checked
+  against Steam; anything that can't be confirmed as a game is held in a
+  **Review** list instead of cluttering your library. Keep or Remove each — and
+  removed items are remembered so they never come back.
+- **Library filter:** a search box to quickly find a game in a big library.
+- **Trusted vs. uncertain:** Steam/Xbox/Epic/GOG are added straight away; only
+  heuristic finds go through review.
+- Builds on the existing **Add / Edit / 🗑 Remove** so the whole library is yours
+  to curate.
+
 ## v1.8.0
 - **New: detect games from Desktop shortcuts** — resolves each shortcut to its
   real `.exe` and keeps the game-like ones (high precision; on by default).

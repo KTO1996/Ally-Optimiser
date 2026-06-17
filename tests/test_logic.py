@@ -378,6 +378,31 @@ def test_placeholder_cover_generation():
             assert cv.placeholder_for("Forza Horizon 6") == path  # cached
 
 
+def test_scan_all_filters_ignored():
+    import tempfile
+    sentinel = [scanners.DetectedGame("Banished App", None, "Folder", verified=False)]
+    orig = scanners.scan_folder
+    try:
+        scanners.scan_folder = lambda p, *a: sentinel
+        cfg = {"game_folders": ["X"]}
+        assert any(g.name == "Banished App" for g in scanners.scan_all(cfg))
+        cfg["ignored_games"] = ["Banished App"]
+        assert not any(g.name == "Banished App" for g in scanners.scan_all(cfg))
+    finally:
+        scanners.scan_folder = orig
+
+
+def test_verified_flag_roundtrip():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        scanners.REVIEW_CACHE = os.path.join(tmp, "review.json")
+        games = [scanners.DetectedGame("Mystery.exe game", "Mystery.exe", "Folder",
+                                       verified=False)]
+        scanners.save_review(games)
+        back = scanners.load_review()
+        assert len(back) == 1 and back[0].verified is False
+
+
 def test_detected_cache_roundtrip():
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:

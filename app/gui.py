@@ -30,7 +30,10 @@ from .elevation import is_admin, relaunch_as_admin
 from .watcher import GameWatcher, process_name_map
 from .hotkey import HotkeyManager
 from .paths import ICON_ICO, ICON_PNG
-from .scanners import DetectedGame, load_detected, save_detected, scan_all
+from dataclasses import replace as _dc_replace
+
+from .scanners import (DetectedGame, load_detected, load_review, save_detected,
+                       save_review, scan_all)
 from .tray import TrayIcon
 from .tweakengine import TweakEngine
 
@@ -71,6 +74,8 @@ class AllyOptimizerApp(ctk.CTk):
         self.games_doc: Dict = prof.load_games()
         # Reload the last scan so the library persists across restarts.
         self.detected: Dict[str, DetectedGame] = {d.name: d for d in load_detected()}
+        self.review: List[DetectedGame] = load_review()
+        self.library_filter: str = ""
         self._img_refs: List = []          # keep CTkImage refs alive
         self.power_mode = ctk.StringVar(value="Auto")
         self.selected_game: Optional[str] = None
@@ -283,6 +288,10 @@ class AllyOptimizerApp(ctk.CTk):
     def _page_games(self) -> None:
         self._header_title("Games")
         self._accent_button(self.header, "⟳ Scan", self._on_scan, width=90).pack(side="right")
+        if self.review:
+            ctk.CTkButton(self.header, text=f"🔎 Review ({len(self.review)})",
+                          command=self._open_review, width=110, fg_color=ACCENT,
+                          hover_color=ACCENT_HOVER, text_color="white").pack(side="right", padx=6)
         ctk.CTkButton(self.header, text="📁 Scan folder…", command=self._scan_folder,
                       width=120, fg_color=("gray75", "gray30"),
                       hover_color=("gray65", "gray38"),
@@ -315,14 +324,25 @@ class AllyOptimizerApp(ctk.CTk):
     def _build_games_split(self) -> None:
         wrap = ctk.CTkFrame(self.body, fg_color="transparent")
         wrap.grid(row=0, column=0, sticky="nsew")
-        wrap.grid_rowconfigure(0, weight=1)
+        wrap.grid_rowconfigure(1, weight=1)
         wrap.grid_columnconfigure(1, weight=1)
+
+        search = ctk.CTkEntry(wrap, width=290, placeholder_text="🔎 Filter games…")
+        if self.library_filter:
+            search.insert(0, self.library_filter)
+        search.grid(row=0, column=0, sticky="ew", padx=(0, 10), pady=(0, 6))
+        search.bind("<KeyRelease>", lambda e: self._on_filter_changed(search.get()))
+
         self.game_list = ctk.CTkScrollableFrame(wrap, width=290, label_text="Library")
-        self.game_list.grid(row=0, column=0, sticky="ns", padx=(0, 10))
+        self.game_list.grid(row=1, column=0, sticky="ns", padx=(0, 10))
         self.detail = ctk.CTkScrollableFrame(wrap, fg_color="transparent")
-        self.detail.grid(row=0, column=1, sticky="nsew")
+        self.detail.grid(row=1, column=1, sticky="nsew")
         self._refresh_game_list()
         self._render_detail()
+
+    def _on_filter_changed(self, text: str) -> None:
+        self.library_filter = text
+        self._refresh_game_list()
 
     def _build_games_grid(self) -> None:
         grid = ctk.CTkScrollableFrame(self.body, fg_color="transparent")
@@ -360,7 +380,11 @@ class AllyOptimizerApp(ctk.CTk):
         detected_only = sorted(
             (d.name for d in self.detected.values() if d.name.lower() not in saved_lower),
             key=str.lower)
-        return [f"{g}" for g in saved] + [f"{g}  (detected)" for g in detected_only]
+        entries = [f"{g}" for g in saved] + [f"{g}  (detected)" for g in detected_only]
+        flt = (self.library_filter or "").strip().lower()
+        if flt:
+            entries = [e for e in entries if flt in e.lower()]
+        return entries
 
     def _entry_to_name(self, entry: str) -> str:
         return entry[:-len("  (detected)")] if entry.endswith("  (detected)") else entry
@@ -915,7 +939,22 @@ class AllyOptimizerApp(ctk.CTk):
                 found = scan_all(self.config_data)
             except Exception:
                 found = []
-            self.after(0, lambda: self._scan_done(found))
+            verified, review = [], []
+            for g in found:
+                if g.verified:
+                    verified.append(g)
+                    continue
+                # Uncertain source: confirm against Steam search; if it matches a
+                # real game keep it, otherwise queue it for the user to review.
+                try:
+                    appid = covers.search_steam_appid(g.name)
+                except Exception:
+                    appid = None
+                if appid:
+                    verified.append(_dc_replace(g, verified=True, appid=g.appid or appid))
+                else:
+                    review.append(g)
+            self.after(0, lambda: self._scan_done(verified, review))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -931,23 +970,27 @@ class AllyOptimizerApp(ctk.CTk):
             cfg.save_config(self.config_data)
         self._on_scan()   # rescan now includes the saved folder(s)
 
-    def _scan_done(self, found) -> None:
+    def _scan_done(self, found, review=None) -> None:
         self._scanning = False
         self.detected = {d.name: d for d in found}
-        save_detected(found)   # remember across restarts
+        self.review = review or []
+        save_detected(found)        # remember across restarts
+        save_review(self.review)
         if self.active_page == "Games":
-            self._refresh_game_list()
-        # Per-source breakdown so an unexpected count is easy to diagnose.
+            self._show_page("Games")
         by_source: Dict[str, int] = {}
         for d in found:
             by_source[d.source] = by_source.get(d.source, 0) + 1
         breakdown = ", ".join(f"{s}: {n}" for s, n in sorted(by_source.items())) or "none"
-        self.applied_var.set(f"Scan complete — {len(found)} game(s) ({breakdown}).")
+        extra = (f"\n\n{len(self.review)} uncertain item(s) need review — "
+                 "open “Review” to keep or remove them.") if self.review else ""
+        self.applied_var.set(f"Scan complete — {len(found)} game(s); "
+                             f"{len(self.review)} to review.")
         messagebox.showinfo(
             "Scan complete",
-            f"Detected {len(found)} game(s).\n\nBy source — {breakdown}.\n\n"
-            "Only Steam / Xbox (Game Pass) / Epic / GOG are scanned by default. "
-            "If a count looks too high, tell me which source so I can tune it.")
+            f"Added {len(found)} game(s).\n\nBy source — {breakdown}.{extra}")
+        if self.review:
+            self._open_review()
 
     def _auto_fill_all(self) -> None:
         """Background pass over the library: fetch cover art for everything and
@@ -1079,6 +1122,29 @@ class AllyOptimizerApp(ctk.CTk):
 
     def _open_edit_form(self, name: Optional[str] = None) -> None:
         EditGameDialog(self, name)
+
+    def _open_review(self) -> None:
+        if not self.review:
+            messagebox.showinfo("Review", "Nothing to review — your library looks clean.")
+            return
+        ReviewDialog(self)
+
+    def _review_keep(self, game: DetectedGame) -> None:
+        """Accept an uncertain detection into the library."""
+        self.detected[game.name] = _dc_replace(game, verified=True)
+        self.review = [g for g in self.review if g.name != game.name]
+        save_detected(list(self.detected.values()))
+        save_review(self.review)
+
+    def _review_remove(self, game: DetectedGame) -> None:
+        """Reject an uncertain detection and never re-add it."""
+        ignored = list(self.config_data.get("ignored_games", []))
+        if game.name not in ignored:
+            ignored.append(game.name)
+            self.config_data["ignored_games"] = ignored
+            cfg.save_config(self.config_data)
+        self.review = [g for g in self.review if g.name != game.name]
+        save_review(self.review)
 
     # =========================================================== Settings ====
     def _page_settings(self) -> None:
@@ -1415,6 +1481,88 @@ class AllyOptimizerApp(ctk.CTk):
         self.watcher.stop()
         self.pad.stop()
         self.destroy()
+
+
+class ReviewDialog(ctk.CTkToplevel):
+    """Triage uncertain detections: keep (it's a game) or remove (ignore it)."""
+
+    def __init__(self, app: "AllyOptimizerApp") -> None:
+        super().__init__(app)
+        self.app = app
+        self.title("Review detected items")
+        self.geometry("560x560")
+        self.transient(app)
+        ctk.CTkLabel(self, text="These need review",
+                     font=ctk.CTkFont(size=18, weight="bold")).pack(anchor="w", padx=16, pady=(16, 2))
+        ctk.CTkLabel(self, text="We found these but couldn't confirm they're games "
+                     "(no match on Steam). Keep the ones that are games; remove the "
+                     "rest — removed items won't come back.",
+                     text_color="gray60", font=ctk.CTkFont(size=12), justify="left",
+                     wraplength=520).pack(anchor="w", padx=16, pady=(0, 8))
+        bar = ctk.CTkFrame(self, fg_color="transparent")
+        bar.pack(fill="x", padx=16)
+        ctk.CTkButton(bar, text="Keep all", width=90, command=self._keep_all,
+                      fg_color=("gray75", "gray30"), hover_color=("gray65", "gray38"),
+                      text_color=("gray10", "gray90")).pack(side="left")
+        ctk.CTkButton(bar, text="Remove all", width=100, command=self._remove_all,
+                      fg_color="transparent", border_width=1, text_color=("gray10", "gray90"),
+                      border_color=("gray65", "gray45"), hover_color=("gray85", "gray25")).pack(side="left", padx=8)
+        self.listbox = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self.listbox.pack(fill="both", expand=True, padx=12, pady=10)
+        self.after(60, self.lift)
+        self._render()
+
+    def _render(self) -> None:
+        for w in self.listbox.winfo_children():
+            w.destroy()
+        if not self.app.review:
+            ctk.CTkLabel(self.listbox, text="All done — nothing left to review.",
+                         text_color="gray60").pack(anchor="w", pady=10)
+            return
+        for game in list(self.app.review):
+            row = ctk.CTkFrame(self.listbox, corner_radius=8)
+            row.pack(fill="x", pady=4)
+            txt = f"{game.name}"
+            sub = f"{game.source}" + (f" · {game.process_name}" if game.process_name else "")
+            col = ctk.CTkFrame(row, fg_color="transparent")
+            col.pack(side="left", fill="x", expand=True, padx=10, pady=8)
+            ctk.CTkLabel(col, text=txt, anchor="w", justify="left", wraplength=300,
+                         font=ctk.CTkFont(size=13, weight="bold")).pack(anchor="w")
+            ctk.CTkLabel(col, text=sub, anchor="w", text_color="gray60",
+                         font=ctk.CTkFont(size=11)).pack(anchor="w")
+            ctk.CTkButton(row, text="Keep", width=70,
+                          command=lambda g=game: self._keep(g), fg_color=ACCENT,
+                          hover_color=ACCENT_HOVER, text_color="white").pack(side="right", padx=(0, 10))
+            ctk.CTkButton(row, text="Remove", width=80,
+                          command=lambda g=game: self._remove(g), fg_color="transparent",
+                          border_width=1, text_color=("gray10", "gray90"),
+                          border_color=("gray65", "gray45"),
+                          hover_color=("gray85", "gray25")).pack(side="right", padx=6)
+
+    def _keep(self, game) -> None:
+        self.app._review_keep(game)
+        self._after_change()
+
+    def _remove(self, game) -> None:
+        self.app._review_remove(game)
+        self._after_change()
+
+    def _keep_all(self) -> None:
+        for g in list(self.app.review):
+            self.app._review_keep(g)
+        self._after_change()
+
+    def _remove_all(self) -> None:
+        for g in list(self.app.review):
+            self.app._review_remove(g)
+        self._after_change()
+
+    def _after_change(self) -> None:
+        self._render()
+        if self.app.active_page == "Games":
+            self.app._show_page("Games")
+        if not self.app.review:
+            self.destroy()
 
 
 class WelcomeDialog(ctk.CTkToplevel):

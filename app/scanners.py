@@ -33,6 +33,8 @@ IS_WINDOWS = sys.platform.startswith("win")
 
 # Where the most recent scan results are remembered between launches.
 DETECTED_CACHE = os.path.join(PROFILES_DIR, "detected.json")
+# Uncertain detections awaiting the user's keep/remove decision.
+REVIEW_CACHE = os.path.join(PROFILES_DIR, "review.json")
 
 # Exact names that are never actual games.
 _NON_GAME_NAMES = {
@@ -102,8 +104,12 @@ class DetectedGame:
     name: str
     process_name: Optional[str]
     source: str
-    appid: Optional[str] = None   # Steam appid, when known (used for cover art)
+    appid: Optional[str] = None    # Steam appid, when known (used for cover art)
+    verified: bool = True          # False = from a heuristic source, needs review
 
+
+# Sources we trust as definitely-games (real launchers); others are heuristic.
+TRUSTED_SOURCES = {"Steam", "Xbox", "Epic", "GOG"}
 
 def _normalise(name: str) -> str:
     return re.sub(r"\s+", " ", name).strip().lower()
@@ -350,7 +356,7 @@ def scan_folder(path: str, max_depth: int = 3) -> List[DetectedGame]:
         exe = _pick_main_exe(entry.path, max_depth)
         if exe:
             results.append(DetectedGame(name=name, process_name=os.path.basename(exe),
-                                        source="Folder"))
+                                        source="Folder", verified=False))
     return results
 
 
@@ -417,7 +423,8 @@ def scan_shortcuts(include_start_menu: bool = False) -> List[DetectedGame]:
         exe = os.path.basename(target)
         if not _is_game_exe(exe) or _is_system_path(target) or _looks_non_game(name):
             continue
-        results.append(DetectedGame(name=name, process_name=exe, source="Shortcut"))
+        results.append(DetectedGame(name=name, process_name=exe, source="Shortcut",
+                                    verified=False))
     return results
 
 
@@ -463,7 +470,8 @@ def scan_registry_uninstall() -> List[DetectedGame]:
             name = str(name).strip()
             if name and _normalise(name) not in _NON_GAME_NAMES:
                 results.append(
-                    DetectedGame(name=name, process_name=None, source="Installed")
+                    DetectedGame(name=name, process_name=None, source="Installed",
+                                 verified=False)
                 )
     return results
 
@@ -486,7 +494,8 @@ def scan_start_menu() -> List[DetectedGame]:
             stem = os.path.splitext(os.path.basename(lnk))[0].strip()
             if stem and not stem.lower().startswith(("uninstall", "readme")):
                 results.append(
-                    DetectedGame(name=stem, process_name=None, source="Shortcut")
+                    DetectedGame(name=stem, process_name=None, source="Shortcut",
+                                 verified=False)
                 )
     return results
 
@@ -525,10 +534,11 @@ def scan_all(config: Dict, include_generic: Optional[bool] = None) -> List[Detec
         ordered += _safe(scan_registry_uninstall)
         ordered += _safe(scan_start_menu)
 
+    ignored = {_normalise(n) for n in (config.get("ignored_games") or [])}
     seen: Dict[str, DetectedGame] = {}
     for game in ordered:
         key = _normalise(game.name)
-        if key and key not in seen:
+        if key and key not in seen and key not in ignored:
             seen[key] = game
     return sorted(seen.values(), key=lambda g: g.name.lower())
 
@@ -536,26 +546,24 @@ def scan_all(config: Dict, include_generic: Optional[bool] = None) -> List[Detec
 # --------------------------------------------------------------------------- #
 # Persist the most recent scan so the library survives a restart
 # --------------------------------------------------------------------------- #
-def save_detected(games: List[DetectedGame]) -> None:
-    """Cache scan results to ``profiles/detected.json`` (atomic write)."""
-    data = [{"name": g.name, "process_name": g.process_name,
-             "source": g.source, "appid": g.appid} for g in games]
+def _save_games(path: str, games: List[DetectedGame]) -> None:
+    data = [{"name": g.name, "process_name": g.process_name, "source": g.source,
+             "appid": g.appid, "verified": g.verified} for g in games]
     try:
         os.makedirs(PROFILES_DIR, exist_ok=True)
-        tmp = DETECTED_CACHE + ".tmp"
+        tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2, ensure_ascii=False)
-        os.replace(tmp, DETECTED_CACHE)
+        os.replace(tmp, path)
     except OSError:
         pass
 
 
-def load_detected() -> List[DetectedGame]:
-    """Reload the last cached scan results (empty list if none/invalid)."""
-    if not os.path.isfile(DETECTED_CACHE):
+def _load_games(path: str) -> List[DetectedGame]:
+    if not os.path.isfile(path):
         return []
     try:
-        with open(DETECTED_CACHE, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, json.JSONDecodeError):
         return []
@@ -564,10 +572,29 @@ def load_detected() -> List[DetectedGame]:
         try:
             out.append(DetectedGame(name=d["name"], process_name=d.get("process_name"),
                                     source=d.get("source", "Installed"),
-                                    appid=d.get("appid")))
+                                    appid=d.get("appid"),
+                                    verified=bool(d.get("verified", True))))
         except (KeyError, TypeError):
             continue
     return out
+
+
+def save_detected(games: List[DetectedGame]) -> None:
+    """Cache confirmed scan results (survives restarts)."""
+    _save_games(DETECTED_CACHE, games)
+
+
+def load_detected() -> List[DetectedGame]:
+    return _load_games(DETECTED_CACHE)
+
+
+def save_review(games: List[DetectedGame]) -> None:
+    """Cache the uncertain detections awaiting review."""
+    _save_games(REVIEW_CACHE, games)
+
+
+def load_review() -> List[DetectedGame]:
+    return _load_games(REVIEW_CACHE)
 
 
 def _safe(fn, *args) -> List[DetectedGame]:
