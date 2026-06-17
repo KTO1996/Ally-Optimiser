@@ -86,3 +86,6 @@ jobs:
             > The UI + read-only logic are tested on a Windows CI runner; the
             > hardware-touching actions (TDP, powercfg, FSE) are best confirmed on
             > the device via the checklist above.
+
+            **What's changed:** see the
+            [CHANGELOG](https://github.com/KTO1996/Ally-Optimiser/blob/main/CHANGELOG.md).
