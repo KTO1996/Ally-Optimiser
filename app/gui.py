@@ -204,27 +204,34 @@ class AllyOptimizerApp(ctk.CTk):
 
     def _load_cover_into(self, name: str, label: ctk.CTkLabel, size=(150, 225),
                          guard_selected: bool = True) -> None:
-        """Resolve a cover in the background; on success cache it + update UI."""
+        """Resolve cover art off the UI thread.
+
+        Tries real art (saved cover URL or Steam appid) and persists it; if none
+        is available, falls back to a generated placeholder. All of it — image
+        generation included — runs on a worker thread so the UI never blocks.
+        """
         game = prof.find_game(self.games_doc, name)
+        if covers.cached_cover(game):
+            return  # real art already shown synchronously
         det = self.detected.get(name)
         appid = det.appid if det else None
-        if covers.cached_cover(game):
-            return  # already shown
-        if not (game and game.get("cover")) and not appid:
-            return
 
         def work():
-            path = covers.resolve_cover(game, appid, allow_network=True)
+            path = None
+            if (game and game.get("cover")) or appid:
+                path = covers.resolve_cover(game, appid, allow_network=True)
+                if path and game is not None and game.get("cover") != path:
+                    prof.upsert_game(self.games_doc, name,
+                                     game.get("process_name", ""),
+                                     game.get("profiles", []),
+                                     source=game.get("source", "manual entry"),
+                                     cover=path)
+                    prof.save_games(self.games_doc)
             if not path:
-                return
-            if game is not None and game.get("cover") != path:
-                prof.upsert_game(self.games_doc, name,
-                                 (game or {}).get("process_name", ""),
-                                 (game or {}).get("profiles", []),
-                                 source=(game or {}).get("source", "manual entry"),
-                                 cover=path)
-                prof.save_games(self.games_doc)
-            self.after(0, lambda: self._apply_cover(label, path, name, size, guard_selected))
+                path = covers.placeholder_for(name)   # generated + cached on disk
+            if path:
+                self.after(0, lambda: self._apply_cover(label, path, name, size,
+                                                        guard_selected))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -321,14 +328,14 @@ class AllyOptimizerApp(ctk.CTk):
             tile = ctk.CTkFrame(grid, corner_radius=10)
             tile.grid(row=i // cols, column=i % cols, padx=8, pady=8, sticky="n")
             game = prof.find_game(self.games_doc, name)
-            cover_lbl = ctk.CTkLabel(tile, text="", width=150, height=225)
-            cached = covers.cached_cover(game) or covers.placeholder_for(name)
+            cover_lbl = ctk.CTkLabel(tile, text=name, width=150, height=225,
+                                     font=ctk.CTkFont(size=12), wraplength=140)
+            cached = covers.cached_cover(game)
             img = self._cover_image(cached, (150, 225)) if cached else None
             if img is not None:
-                cover_lbl.configure(image=img)
-            else:
-                cover_lbl.configure(text="🎮\n" + name, font=ctk.CTkFont(size=12))
+                cover_lbl.configure(image=img, text="")
             cover_lbl.pack(padx=8, pady=(8, 4))
+            # Real art or placeholder generated off-thread to keep the UI smooth.
             self._load_cover_into(name, cover_lbl, (150, 225), guard_selected=False)
             self._accent_button(tile, "Open", lambda n=name: self._open_from_grid(n),
                                 width=130).pack(pady=(0, 10))
@@ -357,10 +364,10 @@ class AllyOptimizerApp(ctk.CTk):
         for entry in self._all_entries():
             name = self._entry_to_name(entry)
             active = name == self.selected_game
-            # Small thumbnail: real art if cached, else a generated placeholder.
+            # Small thumbnail: only already-cached local art (cheap). Generating
+            # placeholders here would block the UI for large libraries.
             g = prof.find_game(self.games_doc, name)
-            thumb = self._cover_image(covers.cached_cover(g) or covers.placeholder_for(name),
-                                      (22, 33))
+            thumb = self._cover_image(covers.cached_cover(g), (22, 33))
             ctk.CTkButton(
                 self.game_list, text=entry, anchor="w", corner_radius=6,
                 image=thumb, compound="left",
@@ -388,12 +395,13 @@ class AllyOptimizerApp(ctk.CTk):
         head = ctk.CTkFrame(self.detail, fg_color="transparent")
         head.pack(fill="x", anchor="w")
         cover_label = ctk.CTkLabel(head, text="", width=150)
-        cached = covers.cached_cover(game) or covers.placeholder_for(name)
+        cached = covers.cached_cover(game)   # cheap; real art only
         img = self._cover_image(cached, (150, 225)) if cached else None
         if img is not None:
             cover_label.configure(image=img)
         cover_label.pack(side="left", padx=(0, 14), pady=(0, 6))
-        self._load_cover_into(name, cover_label)   # fetch/refresh in background
+        # Real art (network) or a generated placeholder — resolved off-thread.
+        self._load_cover_into(name, cover_label)
 
         info = ctk.CTkFrame(head, fg_color="transparent")
         info.pack(side="left", fill="x", expand=True, anchor="n")
@@ -853,14 +861,26 @@ class AllyOptimizerApp(ctk.CTk):
                 return
 
     def _on_scan(self) -> None:
-        self.configure(cursor="watch")
-        self.update_idletasks()
-        try:
-            found = scan_all(self.config_data)
-        finally:
-            self.configure(cursor="")
+        if getattr(self, "_scanning", False):
+            return
+        self._scanning = True
+        self.applied_var.set("Scanning installed games…")
+
+        def work():
+            try:
+                found = scan_all(self.config_data)
+            except Exception:
+                found = []
+            self.after(0, lambda: self._scan_done(found))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _scan_done(self, found) -> None:
+        self._scanning = False
         self.detected = {d.name: d for d in found}
-        self._refresh_game_list()
+        if self.active_page == "Games":
+            self._refresh_game_list()
+        self.applied_var.set(f"Scan complete — {len(found)} game(s) detected.")
         messagebox.showinfo("Scan complete", f"Detected {len(found)} installed game(s).")
 
     def _auto_fill_all(self) -> None:
@@ -937,12 +957,23 @@ class AllyOptimizerApp(ctk.CTk):
                             "starting points — tweak them per game.")
 
     def _suggest(self, name: str) -> None:
-        self.configure(cursor="watch")
-        self.update_idletasks()
-        try:
-            suggestion = pcgamingwiki.suggest_profile(name, self.config_data)
-        finally:
-            self.configure(cursor="")
+        if getattr(self, "_suggesting", False):
+            return
+        self._suggesting = True
+        self.applied_var.set(f"Looking up {name} on PCGamingWiki…")
+
+        def work():
+            try:
+                suggestion = pcgamingwiki.suggest_profile(name, self.config_data)
+            except Exception:
+                suggestion = None
+            self.after(0, lambda: self._suggest_done(name, suggestion))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _suggest_done(self, name: str, suggestion) -> None:
+        self._suggesting = False
+        self.applied_var.set("")
         if not suggestion:
             messagebox.showinfo("No suggestion",
                                 "Couldn't derive a starting profile from PCGamingWiki.\n"
@@ -957,6 +988,7 @@ class AllyOptimizerApp(ctk.CTk):
         prof.upsert_game(self.games_doc, name, proc, [suggestion],
                          source="PCGamingWiki (algorithmic suggestion)")
         prof.save_games(self.games_doc)
+        self.selected_game = name
         self._refresh_game_list()
         self._render_detail()
 

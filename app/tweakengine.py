@@ -21,6 +21,7 @@ import sys
 from typing import Dict, List, Optional
 
 from . import systweaks as st
+from . import winproc
 from .paths import PROFILES_DIR
 
 STATE_FILE = os.path.join(PROFILES_DIR, "tweak_state.json")
@@ -78,7 +79,7 @@ class TweakEngine:
             if self.dry_run:
                 continue
             try:
-                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                proc = winproc.run(cmd, capture_output=True, text=True, timeout=120)
             except FileNotFoundError:
                 return f"Command not found: {cmd[0]}"
             except subprocess.TimeoutExpired:
@@ -170,7 +171,7 @@ class TweakEngine:
                                   "Planned restore point (dry-run).",
                                   [" ".join(cmd)], True)
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            proc = winproc.run(cmd, capture_output=True, text=True, timeout=180)
         except Exception as exc:
             return st.TweakResult(False, "restore_point", f"Restore point failed: {exc}")
         if proc.returncode != 0:

@@ -349,6 +349,24 @@ def test_placeholder_cover_generation():
             assert cv.placeholder_for("Forza Horizon 6") == path  # cached
 
 
+def test_scan_generic_is_opt_in(monkeypatch=None):
+    # The noisy registry/Start-menu sweep must be OFF unless explicitly enabled.
+    sentinel = [scanners.DetectedGame("Some Installed App", None, "Installed")]
+    orig_reg, orig_lnk = scanners.scan_registry_uninstall, scanners.scan_start_menu
+    try:
+        scanners.scan_registry_uninstall = lambda: sentinel
+        scanners.scan_start_menu = lambda: []
+        default = scanners.scan_all({})                       # no flag -> excluded
+        enabled = scanners.scan_all({"scan_include_generic": True})
+        names_default = {g.name for g in default}
+        names_enabled = {g.name for g in enabled}
+        assert "Some Installed App" not in names_default
+        assert "Some Installed App" in names_enabled
+    finally:
+        scanners.scan_registry_uninstall = orig_reg
+        scanners.scan_start_menu = orig_lnk
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items())
            if k.startswith("test_") and callable(v)]

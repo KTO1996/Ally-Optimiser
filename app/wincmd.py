@@ -11,6 +11,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import List, Optional, Sequence
 
+from . import winproc
+
 
 def is_windows() -> bool:
     return sys.platform.startswith("win")
@@ -38,7 +40,7 @@ def run_commands(
         if dry:
             continue
         try:
-            proc = subprocess.run(list(cmd), capture_output=True, text=True, timeout=timeout)
+            proc = winproc.run(list(cmd), capture_output=True, text=True, timeout=timeout)
         except FileNotFoundError:
             return CmdResult(False, f"Command not found: {cmd[0]}", actions, dry)
         except subprocess.TimeoutExpired:
@@ -55,7 +57,7 @@ def query_text(cmd: Sequence[str], timeout: int = 15) -> str:
     if not is_windows():
         return ""
     try:
-        return subprocess.run(list(cmd), capture_output=True, text=True,
-                              timeout=timeout).stdout
+        return winproc.run(list(cmd), capture_output=True, text=True,
+                           timeout=timeout).stdout
     except Exception:
         return ""

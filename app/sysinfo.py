@@ -18,6 +18,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from . import winproc
+
 # Canonical model keys used across the app.
 ALLY = "ROG Ally"
 ALLY_X = "ROG Ally X"
@@ -126,7 +128,7 @@ def _query_windows() -> tuple[str, Optional[int]]:
         "[math]::Round($cs.TotalPhysicalMemory/1GB))"
     )
     try:
-        out = subprocess.run(
+        out = winproc.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
             capture_output=True, text=True, timeout=15,
         ).stdout.strip()

@@ -24,6 +24,8 @@ import webbrowser
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from . import winproc
+
 from . import wincmd
 
 # Steam app id for Lossless Scaling.
@@ -123,7 +125,7 @@ def launch_tool(tool: ToolStatus) -> bool:
             else:
                 webbrowser.open(tool.path)
         else:
-            subprocess.Popen([tool.path])
+            winproc.popen([tool.path])
         return True
     except Exception:
         return False

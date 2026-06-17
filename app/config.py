@@ -37,6 +37,7 @@ DEFAULTS: Dict[str, Any] = {
     "library_view": "list",           # "list" or "grid" for the Games library
     "seen_welcome": False,            # first-run onboarding shown?
     "enable_gamepad": False,          # Xbox-controller navigation
+    "scan_include_generic": False,    # also list every installed program (noisy)
     # Safety clamps (watts) sent to RyzenAdj. The Z2/Z2 Extreme is comfortable
     # in roughly this band; clamp keeps a bad profile from doing harm.
     "min_tdp": 5,

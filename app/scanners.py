@@ -21,9 +21,12 @@ import glob
 import json
 import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Dict, List, Optional
+
+from . import winproc
 
 IS_WINDOWS = sys.platform.startswith("win")
 
@@ -89,7 +92,7 @@ def scan_xbox() -> List[DetectedGame]:
         "Select-Object Name, PackageFamilyName | ConvertTo-Json -Compress"
     )
     try:
-        out = subprocess.run(
+        out = winproc.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
             capture_output=True, text=True, timeout=60,
         )
@@ -252,14 +255,21 @@ def scan_start_menu() -> List[DetectedGame]:
 # --------------------------------------------------------------------------- #
 # Aggregate
 # --------------------------------------------------------------------------- #
-def scan_all(config: Dict, include_generic: bool = True) -> List[DetectedGame]:
-    """Run every scanner and return de-duplicated results.
+def scan_all(config: Dict, include_generic: Optional[bool] = None) -> List[DetectedGame]:
+    """Run the game-library scanners and return de-duplicated results.
 
     De-dup keeps the *first* (more specific) source for a given name, so a
     Steam/Epic/GOG hit wins over a generic registry/shortcut hit.
+
+    The generic Windows uninstall-registry + Start-menu sweep is **off by
+    default** — it lists every installed program/shortcut (hundreds of
+    non-games), not just games. Enable it with ``scan_include_generic: true`` in
+    config.json if you want launcher-less titles (EA/Ubisoft/etc.) too.
     """
     steam_paths = list(config.get("steam_library_paths", []))
     steam_paths += list(config.get("extra_library_paths", []))
+    if include_generic is None:
+        include_generic = bool(config.get("scan_include_generic", False))
 
     ordered: List[DetectedGame] = []
     ordered += _safe(scan_steam, steam_paths)

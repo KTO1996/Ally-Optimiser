@@ -19,7 +19,7 @@ import webbrowser
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from . import sysinfo
+from . import sysinfo, winproc
 
 
 @dataclass
@@ -133,7 +133,7 @@ def _launch_armoury_crate() -> bool:
         try:
             if cmd[0].endswith(".exe") and not os.path.isfile(cmd[0]):
                 continue
-            subprocess.Popen(cmd)
+            winproc.popen(cmd)
             return True
         except Exception:
             continue

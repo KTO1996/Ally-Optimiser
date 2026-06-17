@@ -23,6 +23,8 @@ import subprocess
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+from . import winproc
+
 
 @dataclass
 class ApplyResult:
@@ -93,7 +95,7 @@ def build_reset_command(exe: str, plugged_default_tdp: int) -> List[str]:
 
 def _run(cmd: List[str]) -> ApplyResult:
     try:
-        proc = subprocess.run(
+        proc = winproc.run(
             cmd,
             capture_output=True,
             text=True,
