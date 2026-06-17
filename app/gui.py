@@ -437,6 +437,14 @@ class AllyOptimizerApp(ctk.CTk):
         if name in self.detected:
             self.detected.pop(name, None)
             save_detected(list(self.detected.values()))
+        # Forget it as "known" and ignore it so a rescan won't re-add it.
+        known = [n for n in self.config_data.get("known_games", []) if n != name]
+        ignored = list(self.config_data.get("ignored_games", []))
+        if name not in ignored:
+            ignored.append(name)
+        self.config_data["known_games"] = known
+        self.config_data["ignored_games"] = ignored
+        cfg.save_config(self.config_data)
         if self.selected_game == name:
             self.selected_game = None
         self._refresh_game_list()
@@ -939,13 +947,16 @@ class AllyOptimizerApp(ctk.CTk):
                 found = scan_all(self.config_data)
             except Exception:
                 found = []
+            # Names we already trust: previously kept ("known") + saved games.
+            known = {n.strip().lower() for n in self.config_data.get("known_games", [])}
+            known |= {n.strip().lower() for n in self.games_doc.get("games", {})}
             verified, review = [], []
             for g in found:
-                if g.verified:
-                    verified.append(g)
+                if g.verified or g.name.strip().lower() in known:
+                    verified.append(_dc_replace(g, verified=True))
                     continue
-                # Uncertain source: confirm against Steam search; if it matches a
-                # real game keep it, otherwise queue it for the user to review.
+                # Uncertain & unseen: confirm against Steam search; keep if it
+                # matches a real game, otherwise queue it for review.
                 try:
                     appid = covers.search_steam_appid(g.name)
                 except Exception:
@@ -1130,9 +1141,15 @@ class AllyOptimizerApp(ctk.CTk):
         ReviewDialog(self)
 
     def _review_keep(self, game: DetectedGame) -> None:
-        """Accept an uncertain detection into the library."""
+        """Accept an uncertain detection into the library (and remember it)."""
         self.detected[game.name] = _dc_replace(game, verified=True)
         self.review = [g for g in self.review if g.name != game.name]
+        # Remember the decision so rescans never re-review this game.
+        known = list(self.config_data.get("known_games", []))
+        if game.name not in known:
+            known.append(game.name)
+            self.config_data["known_games"] = known
+            cfg.save_config(self.config_data)
         save_detected(list(self.detected.values()))
         save_review(self.review)
 

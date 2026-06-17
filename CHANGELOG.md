@@ -2,6 +2,11 @@
 
 All notable changes to Ally Optimizer. Dates are when the release was cut.
 
+## v1.9.1
+- **Kept games stick:** anything you Keep in Review (or add manually) is
+  remembered as a known game and is never sent back to Review on later scans.
+  Removing a game forgets it and ignores it so it won't reappear either.
+
 ## v1.9.0 — library management + review queue
 - **Review queue:** uncertain detections (from folders/shortcuts) are now checked
   against Steam; anything that can't be confirmed as a game is held in a
