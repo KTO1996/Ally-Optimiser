@@ -27,8 +27,12 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from . import winproc
+from .paths import PROFILES_DIR
 
 IS_WINDOWS = sys.platform.startswith("win")
+
+# Where the most recent scan results are remembered between launches.
+DETECTED_CACHE = os.path.join(PROFILES_DIR, "detected.json")
 
 # Folders that are common but never actual games — skip during sweeps.
 _NON_GAME_NAMES = {
@@ -286,6 +290,43 @@ def scan_all(config: Dict, include_generic: Optional[bool] = None) -> List[Detec
         if key and key not in seen:
             seen[key] = game
     return sorted(seen.values(), key=lambda g: g.name.lower())
+
+
+# --------------------------------------------------------------------------- #
+# Persist the most recent scan so the library survives a restart
+# --------------------------------------------------------------------------- #
+def save_detected(games: List[DetectedGame]) -> None:
+    """Cache scan results to ``profiles/detected.json`` (atomic write)."""
+    data = [{"name": g.name, "process_name": g.process_name,
+             "source": g.source, "appid": g.appid} for g in games]
+    try:
+        os.makedirs(PROFILES_DIR, exist_ok=True)
+        tmp = DETECTED_CACHE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, ensure_ascii=False)
+        os.replace(tmp, DETECTED_CACHE)
+    except OSError:
+        pass
+
+
+def load_detected() -> List[DetectedGame]:
+    """Reload the last cached scan results (empty list if none/invalid)."""
+    if not os.path.isfile(DETECTED_CACHE):
+        return []
+    try:
+        with open(DETECTED_CACHE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return []
+    out: List[DetectedGame] = []
+    for d in data if isinstance(data, list) else []:
+        try:
+            out.append(DetectedGame(name=d["name"], process_name=d.get("process_name"),
+                                    source=d.get("source", "Installed"),
+                                    appid=d.get("appid")))
+        except (KeyError, TypeError):
+            continue
+    return out
 
 
 def _safe(fn, *args) -> List[DetectedGame]:

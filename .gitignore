@@ -10,5 +10,7 @@ venv/
 # Local runtime artifacts
 profiles/pcgw_cache.json
 profiles/tweak_state.json
+profiles/detected.json
+profiles/covers/
 ryzenadj.exe
 ryzenadj*/

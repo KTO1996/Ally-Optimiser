@@ -28,7 +28,7 @@ from . import systweaks as st
 from .watcher import GameWatcher, process_name_map
 from .hotkey import HotkeyManager
 from .paths import ICON_ICO, ICON_PNG
-from .scanners import DetectedGame, scan_all
+from .scanners import DetectedGame, load_detected, save_detected, scan_all
 from .tray import TrayIcon
 from .tweakengine import TweakEngine
 
@@ -67,7 +67,8 @@ class AllyOptimizerApp(ctk.CTk):
         self._set_window_icon()
 
         self.games_doc: Dict = prof.load_games()
-        self.detected: Dict[str, DetectedGame] = {}
+        # Reload the last scan so the library persists across restarts.
+        self.detected: Dict[str, DetectedGame] = {d.name: d for d in load_detected()}
         self._img_refs: List = []          # keep CTkImage refs alive
         self.power_mode = ctk.StringVar(value="Auto")
         self.selected_game: Optional[str] = None
@@ -878,6 +879,7 @@ class AllyOptimizerApp(ctk.CTk):
     def _scan_done(self, found) -> None:
         self._scanning = False
         self.detected = {d.name: d for d in found}
+        save_detected(found)   # remember across restarts
         if self.active_page == "Games":
             self._refresh_game_list()
         self.applied_var.set(f"Scan complete — {len(found)} game(s) detected.")

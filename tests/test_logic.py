@@ -349,6 +349,20 @@ def test_placeholder_cover_generation():
             assert cv.placeholder_for("Forza Horizon 6") == path  # cached
 
 
+def test_detected_cache_roundtrip():
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        scanners.DETECTED_CACHE = os.path.join(tmp, "detected.json")
+        scanners.PROFILES_DIR = tmp
+        games = [scanners.DetectedGame("Doom", "DOOMEternal.exe", "Steam", "782330"),
+                 scanners.DetectedGame("Halo", None, "Xbox", None)]
+        scanners.save_detected(games)
+        back = scanners.load_detected()
+        assert [g.name for g in back] == ["Doom", "Halo"]
+        assert back[0].appid == "782330" and back[0].process_name == "DOOMEternal.exe"
+        assert back[1].source == "Xbox"
+
+
 def test_scan_generic_is_opt_in(monkeypatch=None):
     # The noisy registry/Start-menu sweep must be OFF unless explicitly enabled.
     sentinel = [scanners.DetectedGame("Some Installed App", None, "Installed")]
