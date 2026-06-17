@@ -14,6 +14,7 @@ ROG red accent over CustomTkinter's dark/light appearance modes.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog
@@ -25,6 +26,7 @@ from . import APP_NAME, __version__, armoury, backup, batteryest, boost, config 
 from . import covers, display, gamepad, hibernate, importer, pcgamingwiki, power
 from . import presets, profiles as prof, ryzenadj, sysinfo, updates, weblinks
 from . import systweaks as st
+from .elevation import is_admin, relaunch_as_admin
 from .watcher import GameWatcher, process_name_map
 from .hotkey import HotkeyManager
 from .paths import ICON_ICO, ICON_PNG
@@ -1004,6 +1006,15 @@ class AllyOptimizerApp(ctk.CTk):
         self._refresh_game_list()
         self._render_detail()
 
+    def _relaunch_admin(self) -> None:
+        if relaunch_as_admin():
+            self._quit()   # elevated instance is starting; close this one
+        else:
+            messagebox.showinfo(
+                "Administrator",
+                "Couldn't start an elevated instance (you may have declined the "
+                "prompt). Right-click AllyOptimizer.exe → Run as administrator.")
+
     def _choose_ryzenadj(self) -> None:
         path = filedialog.askopenfilename(
             title="Locate ryzenadj.exe",
@@ -1071,6 +1082,18 @@ class AllyOptimizerApp(ctk.CTk):
         ctk.CTkButton(rrow, text="Set RyzenAdj…", width=120, command=self._choose_ryzenadj,
                       fg_color=("gray75", "gray30"), hover_color=("gray65", "gray38"),
                       text_color=("gray10", "gray90")).pack(side="left")
+
+        arow = ctk.CTkFrame(card2, fg_color="transparent")
+        arow.pack(anchor="w", padx=12, pady=(0, 10))
+        admin = is_admin()
+        ctk.CTkLabel(arow, text=("Administrator: ✓ yes" if admin
+                                 else "Administrator: ✗ no — Apply will fail"),
+                     text_color=(RISK_COLORS["safe"] if admin else RISK_COLORS["experimental"]),
+                     font=ctk.CTkFont(size=11, weight="bold")).pack(side="left", padx=(0, 8))
+        if not admin:
+            ctk.CTkButton(arow, text="Relaunch as administrator", width=190,
+                          command=self._relaunch_admin, fg_color=ACCENT,
+                          hover_color=ACCENT_HOVER, text_color="white").pack(side="left")
 
         # --- Backup / safety ---
         card3 = self._card(scroller)
@@ -1295,7 +1318,10 @@ class AllyOptimizerApp(ctk.CTk):
         ctk.set_appearance_mode(self.theme_mode)
 
     def _tick_status(self) -> None:
-        self.status_var.set(power.get_status().summary())
+        status = power.get_status().summary()
+        if not is_admin() and sys.platform.startswith("win"):
+            status += "   •   ⚠ Not admin — Apply will fail (Settings → Relaunch as admin)"
+        self.status_var.set(status)
         if hasattr(self, "device_label"):
             self.device_label.configure(text=self.device.summary())
         self.after(5000, self._tick_status)

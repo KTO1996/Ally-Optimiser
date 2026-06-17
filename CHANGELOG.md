@@ -2,6 +2,15 @@
 
 All notable changes to Ally Optimizer. Dates are when the release was cut.
 
+## v1.6.2
+- **Reliable admin elevation:** fixed the self-elevation fallback for the
+  packaged exe (it previously passed the exe's own path as an argument and
+  failed). The exe already requests admin via its manifest; now the fallback
+  works too.
+- **Admin visibility:** Settings shows whether you're running as Administrator,
+  with a **"Relaunch as administrator"** button, and the status bar warns when
+  you're not elevated (since Apply needs it).
+
 ## v1.6.1
 - **Clearer RyzenAdj errors:** when an Apply fails, the app now explains the
   usual causes — missing `WinRing0x64.dll`/`WinRing0x64.sys` next to
