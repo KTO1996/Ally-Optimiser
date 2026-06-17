@@ -93,6 +93,31 @@ def build_reset_command(exe: str, plugged_default_tdp: int) -> List[str]:
     ]
 
 
+def _failure_hint(exe: str) -> str:
+    """Explain the usual reasons RyzenAdj fails to apply on the Ally."""
+    hints: List[str] = []
+    folder = os.path.dirname(exe) or "."
+    missing = [f for f in ("WinRing0x64.dll", "WinRing0x64.sys")
+               if not os.path.isfile(os.path.join(folder, f))]
+    if missing:
+        hints.append(
+            "Missing driver file(s) next to ryzenadj.exe: " + ", ".join(missing)
+            + ". Copy ALL files from the RyzenAdj zip into this folder, not just "
+            "ryzenadj.exe.")
+    try:
+        from .elevation import is_admin
+        if not is_admin():
+            hints.append("The app isn't running as Administrator — relaunch it "
+                         "elevated (RyzenAdj needs admin to set power limits).")
+    except Exception:
+        pass
+    if not hints:
+        hints.append("RyzenAdj couldn't access the hardware. Make sure it's run "
+                     "as Administrator and that WinRing0x64.dll and "
+                     "WinRing0x64.sys sit next to ryzenadj.exe.")
+    return "\n\n" + "\n\n".join(hints)
+
+
 def _run(cmd: List[str]) -> ApplyResult:
     try:
         proc = winproc.run(
@@ -107,7 +132,10 @@ def _run(cmd: List[str]) -> ApplyResult:
         return ApplyResult(False, cmd, "RyzenAdj timed out.")
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()
-        return ApplyResult(False, cmd, f"RyzenAdj failed: {detail}")
+        msg = f"RyzenAdj failed (exit {proc.returncode})."
+        if detail:
+            msg += f"\n{detail}"
+        return ApplyResult(False, cmd, msg + _failure_hint(cmd[0]))
     return ApplyResult(True, cmd, (proc.stdout or "Applied.").strip())
 
 

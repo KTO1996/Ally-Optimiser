@@ -2,6 +2,12 @@
 
 All notable changes to Ally Optimizer. Dates are when the release was cut.
 
+## v1.6.1
+- **Clearer RyzenAdj errors:** when an Apply fails, the app now explains the
+  usual causes — missing `WinRing0x64.dll`/`WinRing0x64.sys` next to
+  `ryzenadj.exe`, or not running as Administrator — and shows RyzenAdj's exit
+  code/output.
+
 ## v1.6.0
 - **Fix:** the Xbox/Game Pass scanner now detects only actual games (those with
   a `MicrosoftGame.config`), instead of every Store-signed app — this was the

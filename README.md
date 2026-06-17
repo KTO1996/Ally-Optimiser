@@ -133,7 +133,10 @@ actual power-limit setting.
 
 1. Download a RyzenAdj release from the official project:
    <https://github.com/FlyGoat/RyzenAdj/releases>
-2. Unzip it somewhere (e.g. `C:\Tools\RyzenAdj\ryzenadj.exe`).
+2. Unzip it and copy **all** of its files together (e.g. into
+   `C:\Tools\RyzenAdj\`). **`ryzenadj.exe` needs `WinRing0x64.dll` and
+   `WinRing0x64.sys` in the same folder** — copying only the `.exe` will make
+   Apply fail with a driver error.
 3. In the app, click **RyzenAdj…** and point it at `ryzenadj.exe`
    (this saves the path into `profiles/config.json`). Or edit
    `"ryzenadj_path"` in that file directly.
