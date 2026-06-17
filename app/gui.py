@@ -400,6 +400,24 @@ class AllyOptimizerApp(ctk.CTk):
         self._refresh_game_list()
         self._render_detail()
 
+    def _remove_game(self, name: str) -> None:
+        """Remove a game from the library (saved entry + detected cache)."""
+        if not messagebox.askyesno("Remove game",
+                                   f"Remove “{name}” from the list?\n\n"
+                                   "(It won't touch the actual game — just this list. "
+                                   "A rescan may re-detect it.)"):
+            return
+        if prof.find_game(self.games_doc, name):
+            self.games_doc.get("games", {}).pop(name, None)
+            prof.save_games(self.games_doc)
+        if name in self.detected:
+            self.detected.pop(name, None)
+            save_detected(list(self.detected.values()))
+        if self.selected_game == name:
+            self.selected_game = None
+        self._refresh_game_list()
+        self._render_detail()
+
     def _render_detail(self) -> None:
         for w in self.detail.winfo_children():
             w.destroy()
@@ -424,8 +442,15 @@ class AllyOptimizerApp(ctk.CTk):
 
         info = ctk.CTkFrame(head, fg_color="transparent")
         info.pack(side="left", fill="x", expand=True, anchor="n")
-        ctk.CTkLabel(info, text=name,
-                     font=ctk.CTkFont(size=18, weight="bold")).pack(anchor="w")
+        titlebar = ctk.CTkFrame(info, fg_color="transparent")
+        titlebar.pack(fill="x")
+        ctk.CTkLabel(titlebar, text=name, justify="left", wraplength=420,
+                     font=ctk.CTkFont(size=18, weight="bold")).pack(side="left")
+        ctk.CTkButton(titlebar, text="🗑 Remove", width=90,
+                      command=lambda n=name: self._remove_game(n),
+                      fg_color="transparent", border_width=1,
+                      text_color=("gray10", "gray90"), border_color=("gray65", "gray45"),
+                      hover_color=("gray85", "gray25")).pack(side="right")
         self._add_find_settings(name, info)
 
         # Quick presets (apply instantly, scaled to this console).
@@ -1075,6 +1100,10 @@ class AllyOptimizerApp(ctk.CTk):
         if not self.watcher.available():
             ctk.CTkLabel(card, text="(psutil not available — auto-apply disabled)",
                          text_color="gray60", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=12)
+        self._toggle_row(card, "scan_shortcuts",
+                         "Detect games from Desktop shortcuts when scanning")
+        self._toggle_row(card, "scan_include_generic",
+                         "Deep scan: include Start-menu + all installed programs (noisy)")
         self._toggle_row(card, "enable_hotkey", "Global hotkey to reapply last profile")
         self._toggle_row(card, "minimize_to_tray", "Minimise to system tray on close")
         self.gamepad_switch = ctk.CTkSwitch(

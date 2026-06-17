@@ -51,11 +51,46 @@ def _save_appid_cache(cache: dict) -> None:
         pass
 
 
+def _name_variants(name: str):
+    """Search terms to try, broadest match last (raw → cleaned → first words)."""
+    try:
+        from .scanners import clean_title
+        cleaned = clean_title(name)
+    except Exception:
+        cleaned = name
+    variants = [name.strip(), cleaned]
+    words = cleaned.split()
+    if len(words) > 3:
+        variants.append(" ".join(words[:3]))   # drop trailing subtitle/edition
+    seen, out = set(), []
+    for v in variants:
+        v = v.strip()
+        if v and v.lower() not in seen:
+            seen.add(v.lower())
+            out.append(v)
+    return out
+
+
+def _steam_search_once(term: str) -> Optional[str]:
+    try:
+        url = _STEAM_SEARCH + urllib.parse.urlencode({"term": term, "cc": "us", "l": "en"})
+        req = urllib.request.Request(url, headers=_UA)
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            data = json.loads(resp.read(200_000).decode("utf-8", "ignore"))
+        items = data.get("items") or []
+        if items:
+            return str(items[0].get("id") or "") or None
+    except Exception:
+        return None
+    return None
+
+
 def search_steam_appid(name: str) -> Optional[str]:
     """Find a Steam appid for a game name via the public store search.
 
-    Cached (including misses) so repeat/auto-fill runs don't re-query. Returns
-    None if nothing matches or the request fails.
+    Tries the raw name, then a cleaned version (trademarks / edition words
+    stripped), then just the first words — so partial/imperfect names still
+    match. Cached (including misses) so repeat/auto-fill runs don't re-query.
     """
     if not name:
         return None
@@ -64,16 +99,10 @@ def search_steam_appid(name: str) -> Optional[str]:
     if key in cache:
         return cache[key] or None
     appid = None
-    try:
-        url = _STEAM_SEARCH + urllib.parse.urlencode({"term": name, "cc": "us", "l": "en"})
-        req = urllib.request.Request(url, headers=_UA)
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-            data = json.loads(resp.read(200_000).decode("utf-8", "ignore"))
-        items = data.get("items") or []
-        if items:
-            appid = str(items[0].get("id") or "") or None
-    except Exception:
-        appid = None
+    for term in _name_variants(name):
+        appid = _steam_search_once(term)
+        if appid:
+            break
     cache[key] = appid or ""
     _save_appid_cache(cache)
     return appid

@@ -55,6 +55,48 @@ def _looks_non_game(name: str) -> bool:
     return any(sub in norm for sub in _NON_GAME_SUBSTRINGS)
 
 
+# Folders that are never a game (skip while scanning, esp. if pointed at C:\).
+_SYSTEM_DIR_NAMES = {
+    "windows", "windows.old", "program files", "program files (x86)",
+    "programdata", "$recycle.bin", "system volume information", "perflogs",
+    "recovery", "users", "appdata", "microsoft", "common files", "windowsapps",
+    "intel", "amd", "nvidia", "nvidia corporation", "drivers", "boot",
+    "msocache", "config.msi", "dell", "realtek", "windows defender",
+    "packages", "temp", "tmp", "cache",
+}
+
+# Shortcut/registry targets that are apps, not games — drop these.
+_NON_GAME_APPS = (
+    "discord", "chrome", "firefox", "edge", "msedge", "spotify", "steam.exe",
+    "epicgameslauncher", "galaxyclient", "eadesktop", "ubisoftconnect",
+    "battle.net", "obs", "vlc", "notepad", "explorer", "cmd", "powershell",
+    "code.exe", "teams", "zoom", "slack", "outlook", "onedrive", "skype",
+    "armourycrate", "msiafterburner", "rivatuner", "calculator",
+)
+
+# Words/markers stripped when matching a game name to store art.
+_EDITION_WORDS = (
+    "game of the year", "goty", "definitive edition", "deluxe edition",
+    "ultimate edition", "complete edition", "enhanced edition", "standard edition",
+    "gold edition", "remastered", "remaster", "anniversary edition", "collection",
+    "bundle", "directors cut", "director's cut",
+)
+
+
+def clean_title(name: str) -> str:
+    """Normalise a display name for store/cover lookups (strip noise/editions)."""
+    s = re.sub(r"\s*\(detected\)\s*$", "", name or "", flags=re.IGNORECASE)
+    s = re.sub(r"[™®©]", "", s)
+    low = s.lower()
+    for w in _EDITION_WORDS:
+        idx = low.find(w)
+        if idx != -1:
+            s = s[:idx]
+            low = s.lower()
+    s = re.sub(r"[:\-–—]\s*$", "", s.strip())
+    return re.sub(r"\s{2,}", " ", s).strip()
+
+
 @dataclass(frozen=True)
 class DetectedGame:
     name: str
@@ -239,29 +281,46 @@ def _is_game_exe(filename: str) -> bool:
     if not low.endswith(".exe"):
         return False
     stem = low[:-4]
-    return not any(frag in stem for frag in _NON_GAME_EXE)
+    if any(frag in stem for frag in _NON_GAME_EXE):
+        return False
+    return not any(app in low for app in _NON_GAME_APPS)
 
 
-def _pick_main_exe(folder: str, max_depth: int = 2) -> Optional[str]:
+def _is_system_path(path: str) -> bool:
+    """True if a path lives under a Windows/system location (not a game)."""
+    low = path.lower().replace("/", "\\")
+    return ("\\windows\\" in low or low.endswith("\\windows")
+            or "\\windowsapps\\" in low
+            or "\\program files\\windows" in low
+            or "\\$recycle.bin" in low)
+
+
+def _pick_main_exe(folder: str, max_depth: int = 3) -> Optional[str]:
     """Choose the most likely game executable inside a folder.
 
     Prefers an .exe whose name matches the folder, else the largest candidate.
+    Ignores tiny stub executables and obvious non-game/system paths.
     """
     folder_key = _normalise(os.path.basename(folder)).replace(" ", "")
     base_depth = folder.rstrip("\\/").count(os.sep)
     candidates = []
-    for root, _dirs, files in os.walk(folder):
+    for root, dirs, files in os.walk(folder):
+        # Don't descend into system/junk subfolders.
+        dirs[:] = [d for d in dirs if _normalise(d) not in _SYSTEM_DIR_NAMES]
         if root.count(os.sep) - base_depth >= max_depth:
-            _dirs[:] = []
+            dirs[:] = []
         for f in files:
-            if _is_game_exe(f):
-                path = os.path.join(root, f)
-                try:
-                    size = os.path.getsize(path)
-                except OSError:
-                    size = 0
-                name_match = _normalise(f[:-4]).replace(" ", "") == folder_key
-                candidates.append((name_match, size, path))
+            if not _is_game_exe(f):
+                continue
+            path = os.path.join(root, f)
+            try:
+                size = os.path.getsize(path)
+            except OSError:
+                size = 0
+            if size < 200_000:        # skip tiny helper/stub exes
+                continue
+            name_match = _normalise(f[:-4]).replace(" ", "") == folder_key
+            candidates.append((name_match, size, path))
     if not candidates:
         return None
     # Name match wins; otherwise the biggest executable.
@@ -269,9 +328,13 @@ def _pick_main_exe(folder: str, max_depth: int = 2) -> Optional[str]:
     return candidates[0][2]
 
 
-def scan_folder(path: str, max_depth: int = 2) -> List[DetectedGame]:
-    """Treat each immediate subfolder of ``path`` as a game; find its main exe."""
-    if not path or not os.path.isdir(path):
+def scan_folder(path: str, max_depth: int = 3) -> List[DetectedGame]:
+    """Treat each immediate subfolder of ``path`` as a game; find its main exe.
+
+    Skips system folders, so even pointing this at a drive root won't pull in
+    Windows/Program Files as "games".
+    """
+    if not path or not os.path.isdir(path) or _is_system_path(path):
         return []
     results: List[DetectedGame] = []
     try:
@@ -282,12 +345,79 @@ def scan_folder(path: str, max_depth: int = 2) -> List[DetectedGame]:
         if not entry.is_dir():
             continue
         name = entry.name.strip()
-        if not name or _looks_non_game(name):
+        if not name or _normalise(name) in _SYSTEM_DIR_NAMES or _looks_non_game(name):
             continue
         exe = _pick_main_exe(entry.path, max_depth)
         if exe:
             results.append(DetectedGame(name=name, process_name=os.path.basename(exe),
                                         source="Folder"))
+    return results
+
+
+# --------------------------------------------------------------------------- #
+# Shortcuts: resolve Desktop / Start-menu .lnk targets back to installed games
+# --------------------------------------------------------------------------- #
+def _shortcut_dirs(include_start_menu: bool) -> List[str]:
+    dirs = [
+        os.path.join(os.environ.get("USERPROFILE", ""), "Desktop"),
+        os.path.join(os.environ.get("PUBLIC", r"C:\Users\Public"), "Desktop"),
+    ]
+    if include_start_menu:
+        dirs += [
+            os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"),
+                         r"Microsoft\Windows\Start Menu\Programs"),
+            os.path.join(os.environ.get("APPDATA", ""),
+                         r"Microsoft\Windows\Start Menu\Programs"),
+        ]
+    return [d for d in dirs if d and os.path.isdir(d)]
+
+
+def scan_shortcuts(include_start_menu: bool = False) -> List[DetectedGame]:
+    """Detect games by resolving Desktop (and optionally Start-menu) shortcuts.
+
+    Each ``.lnk`` is resolved to its real target via WScript.Shell; we keep only
+    targets that are a game-like ``.exe`` (not a system/app executable). This is
+    the "work backwards from the desktop" approach — high precision because the
+    shortcuts are user-created.
+    """
+    if not IS_WINDOWS:
+        return []
+    dirs = _shortcut_dirs(include_start_menu)
+    if not dirs:
+        return []
+    dirs_literal = ",".join("'" + d.replace("'", "''") + "'" for d in dirs)
+    ps = (
+        "$sh = New-Object -ComObject WScript.Shell; $out = @(); "
+        f"foreach($d in @({dirs_literal})){{ "
+        "Get-ChildItem -LiteralPath $d -Filter *.lnk -Recurse -ErrorAction SilentlyContinue | "
+        "ForEach-Object { try { $t = $sh.CreateShortcut($_.FullName).TargetPath } catch { $t = '' } "
+        "if($t -and $t.ToLower().EndsWith('.exe')){ "
+        "$out += [pscustomobject]@{Name=$_.BaseName; Target=$t} } } }; "
+        "$out | ConvertTo-Json -Compress"
+    )
+    try:
+        proc = winproc.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return []
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(data, dict):
+        data = [data]
+    results: List[DetectedGame] = []
+    for item in data:
+        name = str(item.get("Name", "")).strip()
+        target = str(item.get("Target", "")).strip()
+        if not name or not target:
+            continue
+        exe = os.path.basename(target)
+        if not _is_game_exe(exe) or _is_system_path(target) or _looks_non_game(name):
+            continue
+        results.append(DetectedGame(name=name, process_name=exe, source="Shortcut"))
     return results
 
 
@@ -385,6 +515,9 @@ def scan_all(config: Dict, include_generic: Optional[bool] = None) -> List[Detec
     ordered += _safe(scan_xbox)
     ordered += _safe(scan_epic)
     ordered += _safe(scan_gog)
+    # Desktop shortcuts catch non-launcher games (resolved to their .exe).
+    if config.get("scan_shortcuts", True):
+        ordered += _safe(scan_shortcuts, include_generic)
     # User-chosen folders for games installed outside any launcher.
     for folder in config.get("game_folders", []) or []:
         ordered += _safe(scan_folder, folder)

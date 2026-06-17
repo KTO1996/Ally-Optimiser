@@ -413,9 +413,9 @@ def test_folder_scan_picks_main_exe():
         gdir = os.path.join(tmp, "Cool Game")
         os.makedirs(gdir)
         with open(os.path.join(gdir, "CoolGame.exe"), "wb") as fh:
-            fh.write(b"x" * 5000)
+            fh.write(b"x" * 500_000)
         with open(os.path.join(gdir, "unins000.exe"), "wb") as fh:
-            fh.write(b"x" * 9000)   # bigger, but must be skipped
+            fh.write(b"x" * 900_000)   # bigger, but must be skipped (uninstaller)
         # A non-game folder.
         os.makedirs(os.path.join(tmp, "Redistributables"))
         found = scanners.scan_folder(tmp)
@@ -423,6 +423,38 @@ def test_folder_scan_picks_main_exe():
         assert found[0].name == "Cool Game"
         assert found[0].process_name == "CoolGame.exe"
         assert found[0].source == "Folder"
+
+
+def test_clean_title_strips_noise():
+    assert scanners.clean_title("Elden Ring™") == "Elden Ring"
+    assert scanners.clean_title("Skyrim (detected)") == "Skyrim"
+    assert scanners.clean_title("Cyberpunk 2077: Ultimate Edition") == "Cyberpunk 2077"
+    assert scanners.clean_title("The Witcher 3 Game of the Year Edition") == "The Witcher 3"
+
+
+def test_folder_scan_skips_system_dirs():
+    with tempfile.TemporaryDirectory() as tmp:
+        # Looks like a drive root with a system folder + a real game folder.
+        winroot = os.path.join(tmp, "Windows")
+        os.makedirs(winroot)
+        with open(os.path.join(winroot, "explorer.exe"), "wb") as fh:
+            fh.write(b"x" * 500_000)
+        gdir = os.path.join(tmp, "My RPG")
+        os.makedirs(gdir)
+        with open(os.path.join(gdir, "MyRPG.exe"), "wb") as fh:
+            fh.write(b"x" * 500_000)
+        names = [g.name for g in scanners.scan_folder(tmp)]
+        assert "My RPG" in names
+        assert "Windows" not in names
+
+
+def test_folder_scan_skips_tiny_exes():
+    with tempfile.TemporaryDirectory() as tmp:
+        gdir = os.path.join(tmp, "Tiny")
+        os.makedirs(gdir)
+        with open(os.path.join(gdir, "Tiny.exe"), "wb") as fh:
+            fh.write(b"x" * 1000)   # under the 200 KB floor
+        assert scanners.scan_folder(tmp) == []
 
 
 def test_steam_filters_non_games():

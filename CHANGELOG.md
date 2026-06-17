@@ -2,6 +2,20 @@
 
 All notable changes to Ally Optimizer. Dates are when the release was cut.
 
+## v1.8.0
+- **New: detect games from Desktop shortcuts** — resolves each shortcut to its
+  real `.exe` and keeps the game-like ones (high precision; on by default).
+- **Tighter folder scan** — skips Windows/system folders (so pointing it at a
+  drive root no longer adds junk) and ignores tiny stub executables.
+- **Fewer false positives** — common apps (browsers, Discord, launchers, etc.)
+  and system executables are filtered out of folder/shortcut results.
+- **New: "🗑 Remove"** button on a game to prune anything mis-detected.
+- **Better cover matching** — names are cleaned (trademarks, edition words,
+  "(detected)") and tried as variants against Steam search, so partial/imperfect
+  names still find art.
+- **Settings:** toggles for Desktop-shortcut detection and the deep (Start-menu +
+  all-programs) scan.
+
 ## v1.7.0
 - **Fix:** GOG now lists only **installed** games (via `InstalledBaseProducts`),
   not your entire owned/known GOG library.
