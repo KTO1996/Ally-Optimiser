@@ -34,11 +34,25 @@ IS_WINDOWS = sys.platform.startswith("win")
 # Where the most recent scan results are remembered between launches.
 DETECTED_CACHE = os.path.join(PROFILES_DIR, "detected.json")
 
-# Folders that are common but never actual games — skip during sweeps.
+# Exact names that are never actual games.
 _NON_GAME_NAMES = {
     "steamworks shared", "steamworks common redistributables",
     "soundtrack", "proton", "directx", "vcredist",
 }
+
+# Substrings that mark a Steam entry as a tool/extra rather than a game.
+_NON_GAME_SUBSTRINGS = (
+    "soundtrack", "dedicated server", "steam linux runtime", "proton",
+    "steamvr", "sdk", "benchmark", "redistributable", "wallpaper engine helper",
+    "blender", "audio production",
+)
+
+
+def _looks_non_game(name: str) -> bool:
+    norm = _normalise(name)
+    if norm in _NON_GAME_NAMES:
+        return True
+    return any(sub in norm for sub in _NON_GAME_SUBSTRINGS)
 
 
 @dataclass(frozen=True)
@@ -73,7 +87,7 @@ def scan_steam(steamapps_common_paths: List[str]) -> List[DetectedGame]:
             if not m:
                 continue
             name = m.group(1).strip()
-            if _normalise(name) in _NON_GAME_NAMES:
+            if _looks_non_game(name):
                 continue
             appid_m = re.search(r'"appid"\s+"(\d+)"', text)
             results.append(DetectedGame(
@@ -86,19 +100,23 @@ def scan_steam(steamapps_common_paths: List[str]) -> List[DetectedGame]:
 # Xbox / Game Pass (UWP/MSIX)
 # --------------------------------------------------------------------------- #
 def scan_xbox() -> List[DetectedGame]:
+    """Detect Xbox / Game Pass PC games (not every Store app).
+
+    An installed Xbox PC game has a ``MicrosoftGame.config`` in its install
+    folder — filtering on that excludes the dozens of inbox/system Store apps
+    that the old ``SignatureKind='Store'`` filter wrongly picked up.
+    """
     if not IS_WINDOWS:
         return []
-    import subprocess
-    # Gaming-related packages tend to live under these publishers/families.
     ps = (
-        "Get-AppxPackage | Where-Object { $_.IsFramework -eq $false -and "
-        "$_.SignatureKind -eq 'Store' } | "
-        "Select-Object Name, PackageFamilyName | ConvertTo-Json -Compress"
+        "Get-AppxPackage | Where-Object { $_.InstallLocation -and "
+        "(Test-Path (Join-Path $_.InstallLocation 'MicrosoftGame.config')) } | "
+        "Select-Object Name | ConvertTo-Json -Compress"
     )
     try:
         out = winproc.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=90,
         )
     except (OSError, subprocess.SubprocessError):
         return []

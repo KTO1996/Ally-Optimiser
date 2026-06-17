@@ -244,6 +244,35 @@ def test_validate_profile_ok_for_sane_values():
     assert sysinfo.validate_profile(good, sysinfo.ALLY) == []
 
 
+def test_covers_steam_appid_search_cached():
+    import tempfile
+    from app import covers as cv
+    with tempfile.TemporaryDirectory() as tmp:
+        cv.COVERS_DIR = tmp
+        cv.APPID_CACHE = os.path.join(tmp, "appid_cache.json")
+        calls = {"n": 0}
+
+        def fake_search(name):
+            # mimic the real function's cache behaviour without network
+            cache = cv._load_appid_cache()
+            key = name.strip().lower()
+            if key in cache:
+                return cache[key] or None
+            calls["n"] += 1
+            cache[key] = "620"
+            cv._save_appid_cache(cache)
+            return "620"
+
+        orig = cv.search_steam_appid
+        cv.search_steam_appid = fake_search
+        try:
+            assert cv.search_steam_appid("Portal 2") == "620"
+            assert cv.search_steam_appid("Portal 2") == "620"   # served from cache
+            assert calls["n"] == 1                               # only one lookup
+        finally:
+            cv.search_steam_appid = orig
+
+
 def test_covers_steam_urls_and_cached():
     assert "library_600x900" in covers.steam_cover_url("620")
     assert covers.is_url("https://example.com/a.jpg")
@@ -361,6 +390,15 @@ def test_detected_cache_roundtrip():
         assert [g.name for g in back] == ["Doom", "Halo"]
         assert back[0].appid == "782330" and back[0].process_name == "DOOMEternal.exe"
         assert back[1].source == "Xbox"
+
+
+def test_steam_filters_non_games():
+    assert scanners._looks_non_game("Halo Infinite Soundtrack")
+    assert scanners._looks_non_game("Team Fortress 2 Dedicated Server")
+    assert scanners._looks_non_game("Steam Linux Runtime 3.0")
+    assert scanners._looks_non_game("Proton 9.0")
+    assert not scanners._looks_non_game("Elden Ring")
+    assert not scanners._looks_non_game("DOOM Eternal")
 
 
 def test_scan_generic_is_opt_in(monkeypatch=None):

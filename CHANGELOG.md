@@ -2,6 +2,18 @@
 
 All notable changes to Ally Optimizer. Dates are when the release was cut.
 
+## v1.6.0
+- **Fix:** the Xbox/Game Pass scanner now detects only actual games (those with
+  a `MicrosoftGame.config`), instead of every Store-signed app — this was the
+  source of the huge inflated counts.
+- **Steam** scan now skips soundtracks, dedicated servers, Proton, runtimes, SDKs
+  and other non-game entries.
+- **Scan results now show a per-source breakdown** (Steam/Xbox/Epic/GOG counts)
+  so unexpected numbers are easy to diagnose.
+- **More cover art:** if a game has no Steam appid, the app now searches the
+  Steam store by name to find its cover (cached) — so non-Steam games get art
+  too, not just the handful that matched before.
+
 ## v1.5.2
 - **Fix:** the list of detected games is now remembered between launches
   (cached to `profiles/detected.json` and reloaded on startup) — no more

@@ -220,7 +220,7 @@ class AllyOptimizerApp(ctk.CTk):
         def work():
             path = None
             if (game and game.get("cover")) or appid:
-                path = covers.resolve_cover(game, appid, allow_network=True)
+                path = covers.resolve_cover(game, appid, name=name, allow_network=True)
                 if path and game is not None and game.get("cover") != path:
                     prof.upsert_game(self.games_doc, name,
                                      game.get("process_name", ""),
@@ -882,8 +882,17 @@ class AllyOptimizerApp(ctk.CTk):
         save_detected(found)   # remember across restarts
         if self.active_page == "Games":
             self._refresh_game_list()
-        self.applied_var.set(f"Scan complete — {len(found)} game(s) detected.")
-        messagebox.showinfo("Scan complete", f"Detected {len(found)} installed game(s).")
+        # Per-source breakdown so an unexpected count is easy to diagnose.
+        by_source: Dict[str, int] = {}
+        for d in found:
+            by_source[d.source] = by_source.get(d.source, 0) + 1
+        breakdown = ", ".join(f"{s}: {n}" for s, n in sorted(by_source.items())) or "none"
+        self.applied_var.set(f"Scan complete — {len(found)} game(s) ({breakdown}).")
+        messagebox.showinfo(
+            "Scan complete",
+            f"Detected {len(found)} game(s).\n\nBy source — {breakdown}.\n\n"
+            "Only Steam / Xbox (Game Pass) / Epic / GOG are scanned by default. "
+            "If a count looks too high, tell me which source so I can tune it.")
 
     def _auto_fill_all(self) -> None:
         """Background pass over the library: fetch cover art for everything and
@@ -927,19 +936,20 @@ class AllyOptimizerApp(ctk.CTk):
                                          source="PCGamingWiki (algorithmic suggestion)")
                         game = prof.find_game(self.games_doc, name)
                         suggested += 1
-                # 2) Fetch + persist cover art (Steam appid or a saved cover URL).
+                # 2) Fetch cover art (saved cover, Steam appid, or name search).
                 appid = det.appid if det else None
                 try:
-                    path = covers.resolve_cover(game, appid, allow_network=True)
+                    path = covers.resolve_cover(game, appid, name=name, allow_network=True)
                 except Exception:
                     path = None
+                if path:
+                    covered += 1
                 if path and game is not None and game.get("cover") != path:
                     prof.upsert_game(self.games_doc, name,
                                      game.get("process_name", ""),
                                      game.get("profiles", []),
                                      source=game.get("source", "manual entry"),
                                      cover=path)
-                    covered += 1
             try:
                 prof.save_games(self.games_doc)
             except Exception:

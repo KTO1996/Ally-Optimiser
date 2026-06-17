@@ -14,7 +14,9 @@ yields ``None`` and the UI falls back to a placeholder.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import urllib.parse
 import urllib.request
 from typing import Optional
 
@@ -22,8 +24,59 @@ from .paths import PROFILES_DIR
 
 COVERS_DIR = os.path.join(PROFILES_DIR, "covers")
 PLACEHOLDERS_DIR = os.path.join(COVERS_DIR, "placeholders")
+APPID_CACHE = os.path.join(COVERS_DIR, "appid_cache.json")
 _UA = {"User-Agent": "AllyOptimizer/1.0 (personal use)"}
 _TIMEOUT = 12
+
+# Steam's storefront search — maps a game name to an appid (no API key needed).
+_STEAM_SEARCH = "https://store.steampowered.com/api/storesearch/?"
+
+
+def _load_appid_cache() -> dict:
+    try:
+        with open(APPID_CACHE, "r", encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_appid_cache(cache: dict) -> None:
+    try:
+        os.makedirs(COVERS_DIR, exist_ok=True)
+        tmp = APPID_CACHE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(cache, fh)
+        os.replace(tmp, APPID_CACHE)
+    except OSError:
+        pass
+
+
+def search_steam_appid(name: str) -> Optional[str]:
+    """Find a Steam appid for a game name via the public store search.
+
+    Cached (including misses) so repeat/auto-fill runs don't re-query. Returns
+    None if nothing matches or the request fails.
+    """
+    if not name:
+        return None
+    cache = _load_appid_cache()
+    key = name.strip().lower()
+    if key in cache:
+        return cache[key] or None
+    appid = None
+    try:
+        url = _STEAM_SEARCH + urllib.parse.urlencode({"term": name, "cc": "us", "l": "en"})
+        req = urllib.request.Request(url, headers=_UA)
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            data = json.loads(resp.read(200_000).decode("utf-8", "ignore"))
+        items = data.get("items") or []
+        if items:
+            appid = str(items[0].get("id") or "") or None
+    except Exception:
+        appid = None
+    cache[key] = appid or ""
+    _save_appid_cache(cache)
+    return appid
 
 
 def steam_cover_url(appid: str) -> str:
@@ -69,11 +122,12 @@ def download_cover(url: str) -> Optional[str]:
 
 
 def resolve_cover(game: Optional[dict], appid: Optional[str] = None,
-                  allow_network: bool = True) -> Optional[str]:
+                  name: Optional[str] = None, allow_network: bool = True) -> Optional[str]:
     """Return a local cover-image path for a game, downloading/caching if needed.
 
-    ``game`` is the saved profile dict (may carry a ``cover``); ``appid`` is the
-    Steam id from the scanner when available.
+    Resolution order: a saved ``cover`` (path or URL) → the scanner's Steam
+    ``appid`` → a Steam store search by ``name`` (so non-Steam games still get
+    art). Returns None if nothing is found.
     """
     cover = (game or {}).get("cover") if game else None
     if cover:
@@ -82,8 +136,12 @@ def resolve_cover(game: Optional[dict], appid: Optional[str] = None,
         if allow_network:
             return download_cover(cover)
         return None
-    if appid and allow_network:
-        for url in (steam_cover_url(appid), steam_header_url(appid)):
+    if not allow_network:
+        return None
+    # Known Steam appid, else look one up by name.
+    aid = appid or (search_steam_appid(name) if name else None)
+    if aid:
+        for url in (steam_cover_url(aid), steam_header_url(aid)):
             path = download_cover(url)
             if path:
                 return path
