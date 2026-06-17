@@ -2,6 +2,15 @@
 
 All notable changes to Ally Optimizer. Dates are when the release was cut.
 
+## v1.7.0
+- **Fix:** GOG now lists only **installed** games (via `InstalledBaseProducts`),
+  not your entire owned/known GOG library.
+- **New: "Scan folder…"** — point the app at the folder where you keep games
+  installed outside any launcher; it finds each game's main executable. The
+  folder is remembered and re-scanned with the normal Scan.
+- **Fix:** long game titles now show in full in the list view (they wrap instead
+  of being cut off).
+
 ## v1.6.2
 - **Reliable admin elevation:** fixed the self-elevation fallback for the
   packaged exe (it previously passed the exe's own path as an argument and

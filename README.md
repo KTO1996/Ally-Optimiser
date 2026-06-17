@@ -71,8 +71,11 @@ controller: D-pad to move, A to select, LB/RB to switch tabs), and a first-run
   **Every tweak is reversible** — Apply records the prior value, Revert restores
   it, and you can drop a **System Restore point** first.
 - **Game list** from `profiles/games.json` plus an **installed-games scan** of
-  Steam, Xbox/Game Pass, Epic, GOG, and a catch-all Windows registry + Start-menu
-  sweep (covers EA, Ubisoft, Battle.net and standalone installers).
+  Steam, Xbox/Game Pass, Epic and GOG (installed titles only). For games kept
+  **outside any launcher**, use **📁 Scan folder…** to point at your games
+  directory — it finds each game's main `.exe`, remembers the folder, and
+  re-scans it next time. An optional `scan_include_generic` flag adds the noisy
+  whole-Windows uninstall/Start-menu sweep if you really want it.
 - **Profile buttons** — each game's saved profiles (TDP sustained/boost,
   resolution, FPS cap, notes) as one-click Apply buttons.
 - **Apply via RyzenAdj** — converts watts → milliwatts and sets the sustained

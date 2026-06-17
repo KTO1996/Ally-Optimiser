@@ -392,6 +392,39 @@ def test_detected_cache_roundtrip():
         assert back[1].source == "Xbox"
 
 
+def test_gog_installed_only():
+    import sqlite3
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "galaxy-2.0.db")
+        con = sqlite3.connect(db)
+        con.execute("CREATE TABLE LimitedDetails (productId INTEGER, title TEXT)")
+        con.execute("CREATE TABLE InstalledBaseProducts (productId INTEGER)")
+        con.executemany("INSERT INTO LimitedDetails VALUES (?,?)",
+                        [(1, "Installed Game"), (2, "Owned But Not Installed")])
+        con.execute("INSERT INTO InstalledBaseProducts VALUES (1)")  # only #1 installed
+        con.commit(); con.close()
+        names = [g.name for g in scanners._gog_installed_from_db(db)]
+        assert names == ["Installed Game"]   # the owned-not-installed one is excluded
+
+
+def test_folder_scan_picks_main_exe():
+    with tempfile.TemporaryDirectory() as tmp:
+        # A game folder with the real exe + an uninstaller (should be ignored).
+        gdir = os.path.join(tmp, "Cool Game")
+        os.makedirs(gdir)
+        with open(os.path.join(gdir, "CoolGame.exe"), "wb") as fh:
+            fh.write(b"x" * 5000)
+        with open(os.path.join(gdir, "unins000.exe"), "wb") as fh:
+            fh.write(b"x" * 9000)   # bigger, but must be skipped
+        # A non-game folder.
+        os.makedirs(os.path.join(tmp, "Redistributables"))
+        found = scanners.scan_folder(tmp)
+        assert len(found) == 1
+        assert found[0].name == "Cool Game"
+        assert found[0].process_name == "CoolGame.exe"
+        assert found[0].source == "Folder"
+
+
 def test_steam_filters_non_games():
     assert scanners._looks_non_game("Halo Infinite Soundtrack")
     assert scanners._looks_non_game("Team Fortress 2 Dedicated Server")

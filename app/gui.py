@@ -283,6 +283,10 @@ class AllyOptimizerApp(ctk.CTk):
     def _page_games(self) -> None:
         self._header_title("Games")
         self._accent_button(self.header, "⟳ Scan", self._on_scan, width=90).pack(side="right")
+        ctk.CTkButton(self.header, text="📁 Scan folder…", command=self._scan_folder,
+                      width=120, fg_color=("gray75", "gray30"),
+                      hover_color=("gray65", "gray38"),
+                      text_color=("gray10", "gray90")).pack(side="right", padx=6)
         ctk.CTkButton(self.header, text="✨ Auto-fill all", command=self._auto_fill_all,
                       width=120, fg_color=("gray75", "gray30"),
                       hover_color=("gray65", "gray38"),
@@ -313,7 +317,7 @@ class AllyOptimizerApp(ctk.CTk):
         wrap.grid(row=0, column=0, sticky="nsew")
         wrap.grid_rowconfigure(0, weight=1)
         wrap.grid_columnconfigure(1, weight=1)
-        self.game_list = ctk.CTkScrollableFrame(wrap, width=240, label_text="Library")
+        self.game_list = ctk.CTkScrollableFrame(wrap, width=290, label_text="Library")
         self.game_list.grid(row=0, column=0, sticky="ns", padx=(0, 10))
         self.detail = ctk.CTkScrollableFrame(wrap, fg_color="transparent")
         self.detail.grid(row=0, column=1, sticky="nsew")
@@ -371,13 +375,25 @@ class AllyOptimizerApp(ctk.CTk):
             # placeholders here would block the UI for large libraries.
             g = prof.find_game(self.games_doc, name)
             thumb = self._cover_image(covers.cached_cover(g), (22, 33))
-            ctk.CTkButton(
-                self.game_list, text=entry, anchor="w", corner_radius=6,
-                image=thumb, compound="left",
-                fg_color=ACCENT if active else "transparent",
-                text_color="white" if active else ("gray10", "gray90"),
-                hover_color=("gray80", "gray25"),
-                command=lambda n=name: self._select_game(n)).pack(fill="x", pady=2, padx=2)
+            # Use a row + wrapping label so long titles show in full (CTkButton
+            # truncates and can't wrap).
+            row = ctk.CTkFrame(self.game_list, corner_radius=6,
+                               fg_color=ACCENT if active else "transparent")
+            row.pack(fill="x", pady=2, padx=2)
+            click = lambda e=None, n=name: self._select_game(n)
+            widgets = [row]
+            if thumb is not None:
+                il = ctk.CTkLabel(row, image=thumb, text="")
+                il.pack(side="left", padx=(6, 4), pady=4)
+                widgets.append(il)
+            tl = ctk.CTkLabel(row, text=entry, anchor="w", justify="left",
+                              wraplength=235,
+                              text_color="white" if active else ("gray10", "gray90"))
+            tl.pack(side="left", fill="x", expand=True,
+                    padx=(6 if thumb is None else 0, 8), pady=4)
+            widgets.append(tl)
+            for w in widgets:
+                w.bind("<Button-1>", click)
 
     def _select_game(self, name: str) -> None:
         self.selected_game = name
@@ -877,6 +893,18 @@ class AllyOptimizerApp(ctk.CTk):
             self.after(0, lambda: self._scan_done(found))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _scan_folder(self) -> None:
+        """Let the user point at a folder of games installed outside a launcher."""
+        folder = filedialog.askdirectory(title="Select a folder that contains your games")
+        if not folder:
+            return
+        folders = list(self.config_data.get("game_folders", []))
+        if folder not in folders:
+            folders.append(folder)
+            self.config_data["game_folders"] = folders
+            cfg.save_config(self.config_data)
+        self._on_scan()   # rescan now includes the saved folder(s)
 
     def _scan_done(self, found) -> None:
         self._scanning = False

@@ -172,6 +172,12 @@ def scan_epic() -> List[DetectedGame]:
 # GOG Galaxy
 # --------------------------------------------------------------------------- #
 def scan_gog() -> List[DetectedGame]:
+    """Installed GOG Galaxy games only.
+
+    Reads the local Galaxy DB but joins on ``InstalledBaseProducts`` so we get
+    only games that are actually installed — not every title Galaxy knows about
+    (the old ``GamePieces`` query returned the whole owned/known library).
+    """
     if not IS_WINDOWS:
         return []
     db = os.path.join(
@@ -180,27 +186,108 @@ def scan_gog() -> List[DetectedGame]:
     )
     if not os.path.isfile(db):
         return []
+    return _gog_installed_from_db(db)
+
+
+def _gog_installed_from_db(db: str) -> List[DetectedGame]:
     import sqlite3
     results: List[DetectedGame] = []
     try:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-        try:
-            cur = con.execute(
-                "SELECT value FROM GamePieces WHERE value LIKE '%\"title\"%'"
-            )
-            for (value,) in cur.fetchall():
-                try:
-                    title = json.loads(value).get("title")
-                except (json.JSONDecodeError, AttributeError):
-                    title = None
-                if title:
-                    results.append(
-                        DetectedGame(name=str(title), process_name=None, source="GOG")
-                    )
-        finally:
-            con.close()
     except sqlite3.Error:
         return []
+    try:
+        # Title lives in LimitedDetails; install state in InstalledBaseProducts.
+        queries = [
+            "SELECT ld.title FROM InstalledBaseProducts ip "
+            "JOIN LimitedDetails ld ON ld.productId = ip.productId",
+            "SELECT ld.title FROM InstalledBaseProducts ip "
+            "JOIN LimitedDetails ld ON ld.id = ip.productId",
+        ]
+        rows = None
+        for q in queries:
+            try:
+                rows = con.execute(q).fetchall()
+                break
+            except sqlite3.Error:
+                continue
+        for row in rows or []:
+            title = (row[0] or "").strip() if row and row[0] else ""
+            if title and not _looks_non_game(title):
+                results.append(DetectedGame(name=title, process_name=None, source="GOG"))
+    finally:
+        con.close()
+    return results
+
+
+
+# --------------------------------------------------------------------------- #
+# Local folder scan (games installed outside any launcher)
+# --------------------------------------------------------------------------- #
+# Executable name fragments that are never the game itself.
+_NON_GAME_EXE = (
+    "unins", "setup", "install", "redist", "vcredist", "vc_redist", "dxsetup",
+    "dotnet", "directx", "oalinst", "crashpad", "crashhandler", "crashreport",
+    "unitycrashhandler", "ueprereqsetup", "prerequisites", "helper", "config",
+    "cleanup", "report", "diag", "benchmark", "launcher", "updater", "update",
+    "server", "editor", "touchup", "notification", "easyanticheat", "battleye",
+)
+
+
+def _is_game_exe(filename: str) -> bool:
+    low = filename.lower()
+    if not low.endswith(".exe"):
+        return False
+    stem = low[:-4]
+    return not any(frag in stem for frag in _NON_GAME_EXE)
+
+
+def _pick_main_exe(folder: str, max_depth: int = 2) -> Optional[str]:
+    """Choose the most likely game executable inside a folder.
+
+    Prefers an .exe whose name matches the folder, else the largest candidate.
+    """
+    folder_key = _normalise(os.path.basename(folder)).replace(" ", "")
+    base_depth = folder.rstrip("\\/").count(os.sep)
+    candidates = []
+    for root, _dirs, files in os.walk(folder):
+        if root.count(os.sep) - base_depth >= max_depth:
+            _dirs[:] = []
+        for f in files:
+            if _is_game_exe(f):
+                path = os.path.join(root, f)
+                try:
+                    size = os.path.getsize(path)
+                except OSError:
+                    size = 0
+                name_match = _normalise(f[:-4]).replace(" ", "") == folder_key
+                candidates.append((name_match, size, path))
+    if not candidates:
+        return None
+    # Name match wins; otherwise the biggest executable.
+    candidates.sort(key=lambda c: (c[0], c[1]), reverse=True)
+    return candidates[0][2]
+
+
+def scan_folder(path: str, max_depth: int = 2) -> List[DetectedGame]:
+    """Treat each immediate subfolder of ``path`` as a game; find its main exe."""
+    if not path or not os.path.isdir(path):
+        return []
+    results: List[DetectedGame] = []
+    try:
+        entries = list(os.scandir(path))
+    except OSError:
+        return []
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        name = entry.name.strip()
+        if not name or _looks_non_game(name):
+            continue
+        exe = _pick_main_exe(entry.path, max_depth)
+        if exe:
+            results.append(DetectedGame(name=name, process_name=os.path.basename(exe),
+                                        source="Folder"))
     return results
 
 
@@ -298,6 +385,9 @@ def scan_all(config: Dict, include_generic: Optional[bool] = None) -> List[Detec
     ordered += _safe(scan_xbox)
     ordered += _safe(scan_epic)
     ordered += _safe(scan_gog)
+    # User-chosen folders for games installed outside any launcher.
+    for folder in config.get("game_folders", []) or []:
+        ordered += _safe(scan_folder, folder)
     if include_generic:
         ordered += _safe(scan_registry_uninstall)
         ordered += _safe(scan_start_menu)
