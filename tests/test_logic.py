@@ -509,6 +509,22 @@ def test_scan_generic_is_opt_in(monkeypatch=None):
         scanners.scan_start_menu = orig_lnk
 
 
+def test_config_has_new_keys():
+    from app import config as cfg
+    d = cfg.DEFAULTS
+    for key in ("tdp_keepalive", "tdp_keepalive_seconds", "reapply_on_launch",
+                "ui_scale", "known_games", "ignored_games"):
+        assert key in d, f"missing default: {key}"
+
+
+def test_updateinfo_has_asset_fields():
+    from app import updates
+    info = updates.UpdateInfo(current="1.0.0", latest="1.1.0", url="x",
+                              update_available=True)
+    assert hasattr(info, "asset_url") and hasattr(info, "asset_name")
+    assert updates.is_newer("v2.0.0", "v1.9.9")
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items())
            if k.startswith("test_") and callable(v)]

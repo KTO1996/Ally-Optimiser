@@ -58,11 +58,20 @@ def main() -> int:
         except Exception:
             print("WARNING: not elevated — RyzenAdj Apply/Reset will fail.")
 
+    from app import __version__
+    from app.applog import get_logger
+    log = get_logger()
+    log.info("Ally Optimizer v%s starting (admin=%s)", __version__, is_admin())
+
     # Import GUI lazily so the elevation check happens before any Tk window.
     from app.gui import AllyOptimizerApp
 
-    app = AllyOptimizerApp()
-    app.mainloop()
+    try:
+        app = AllyOptimizerApp()
+        app.mainloop()
+    except Exception:
+        log.exception("Fatal error in main loop")
+        raise
     return 0
 
 

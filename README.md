@@ -114,7 +114,13 @@ controller: D-pad to move, A to select, LB/RB to switch tabs), and a first-run
   (D-pad/stick to move focus, A to select, B back to Games, LB/RB to switch
   tabs). Toggle in Settings; uses Windows XInput, no extra dependency.
 - **Config backup / restore** (zip) and a one-click **revert all tweaks**.
-- **Update checker** against GitHub Releases, and a first-run **welcome** guide.
+- **Update checker** against GitHub Releases (can download the new build), and a
+  first-run **welcome** guide.
+- **TDP keep-alive** — re-applies your profile periodically so Armoury Crate / the
+  ASUS service can't silently override it, plus **re-apply on launch**.
+- **Multiple profiles per game**, a **UI-scale** option, editable Min/Max TDP and
+  battery/plugged defaults, **tray quick-switch** presets, and a rolling log file
+  (Settings → Open log) for troubleshooting.
 
 ## Requirements
 

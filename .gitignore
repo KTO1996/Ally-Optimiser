@@ -11,6 +11,8 @@ venv/
 profiles/pcgw_cache.json
 profiles/tweak_state.json
 profiles/detected.json
+profiles/review.json
+profiles/allyoptimizer.log*
 profiles/covers/
 ryzenadj.exe
 ryzenadj*/

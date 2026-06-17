@@ -66,10 +66,18 @@ class AllyOptimizerApp(ctk.CTk):
         bt["border_color"] = ["gray65", "gray45"]
         bt["hover_color"] = ["gray85", "gray25"]
 
+        try:
+            ctk.set_widget_scaling(float(self.config_data.get("ui_scale", 1.0)))
+        except Exception:
+            pass
+
         self.title(f"{APP_NAME} v{__version__}")
         self.geometry("1040x680")
         self.minsize(900, 600)
         self._set_window_icon()
+        # Active profile for the TDP keep-alive loop (Armoury Crate overrides it).
+        self._active: Optional[tuple] = None   # (game_name, profile dict)
+        self._keepalive_job = None
 
         self.games_doc: Dict = prof.load_games()
         # Reload the last scan so the library persists across restarts.
@@ -105,6 +113,7 @@ class AllyOptimizerApp(ctk.CTk):
         self._setup_gamepad()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(400, self._maybe_onboard)
+        self.after(800, self._reapply_on_launch)
 
     def _set_window_icon(self) -> None:
         try:
@@ -515,13 +524,15 @@ class AllyOptimizerApp(ctk.CTk):
             ctk.CTkLabel(self.detail, text=f"Source: {game['source']}",
                          text_color="gray50", font=ctk.CTkFont(size=11)).pack(anchor="w")
 
-        for profile in game["profiles"]:
-            self._add_profile_card(name, profile)
-        ctk.CTkButton(self.detail, text="✎ Edit game",
-                      command=lambda: self._open_edit_form(name),
-                      fg_color="transparent", border_width=1, text_color=("gray10", "gray90"), border_color=("gray65", "gray45"), hover_color=("gray85", "gray25")).pack(anchor="w", pady=(10, 0))
+        for idx, profile in enumerate(game["profiles"]):
+            self._add_profile_card(name, profile, idx)
+        btns = ctk.CTkFrame(self.detail, fg_color="transparent")
+        btns.pack(anchor="w", pady=(10, 0))
+        self._accent_button(btns, "＋ Add profile",
+                            lambda: self._open_edit_form(name, profile_index=None),
+                            width=130).pack(side="left")
 
-    def _add_profile_card(self, game_name: str, profile: Dict) -> None:
+    def _add_profile_card(self, game_name: str, profile: Dict, index: int = 0) -> None:
         card = self._card(self.detail)
         card.pack(fill="x", pady=6)
         s = profile.get("tdp_sustained", "?")
@@ -553,7 +564,29 @@ class AllyOptimizerApp(ctk.CTk):
         if profile.get("notes"):
             ctk.CTkLabel(card, text=profile["notes"], text_color="gray55",
                          font=ctk.CTkFont(size=11), justify="left",
-                         wraplength=560).pack(anchor="w", padx=12, pady=(0, 10))
+                         wraplength=560).pack(anchor="w", padx=12, pady=(0, 6))
+        actions = ctk.CTkFrame(card, fg_color="transparent")
+        actions.pack(anchor="w", padx=12, pady=(0, 10))
+        ctk.CTkButton(actions, text="✎ Edit", width=70,
+                      command=lambda: self._open_edit_form(game_name, profile_index=index),
+                      fg_color=("gray75", "gray30"), hover_color=("gray65", "gray38"),
+                      text_color=("gray10", "gray90")).pack(side="left")
+        ctk.CTkButton(actions, text="Delete", width=70,
+                      command=lambda: self._delete_profile(game_name, index),
+                      fg_color="transparent", border_width=1, text_color=("gray10", "gray90"),
+                      border_color=("gray65", "gray45"), hover_color=("gray85", "gray25")
+                      ).pack(side="left", padx=8)
+
+    def _delete_profile(self, game_name: str, index: int) -> None:
+        game = prof.find_game(self.games_doc, game_name)
+        if not game or index >= len(game.get("profiles", [])):
+            return
+        label = game["profiles"][index].get("label", "this profile")
+        if not messagebox.askyesno("Delete profile", f"Delete “{label}”?"):
+            return
+        game["profiles"].pop(index)
+        prof.save_games(self.games_doc)
+        self._render_detail()
 
     def _add_find_settings(self, name: str, parent=None) -> None:
         parent = parent or self.detail
@@ -901,6 +934,9 @@ class AllyOptimizerApp(ctk.CTk):
             cfg.save_config(self.config_data)
             self.applied_var.set(f"Applied: {game_name} — {profile.get('label', '')}")
             self._maybe_apply_resolution(profile)
+            # Track for the keep-alive loop (Armoury Crate re-applies its own limit).
+            self._active = (game_name, dict(profile))
+            self._start_keepalive()
         elif result.dry_run and announce:
             messagebox.showinfo("Dry-run (RyzenAdj not found)",
                                 f"{result.message}\n\nWould run:\n{cmd_str}")
@@ -915,10 +951,53 @@ class AllyOptimizerApp(ctk.CTk):
         if parsed:
             display.set_mode(parsed[0], parsed[1], sysinfo.PANEL_HZ)
 
+    # ------------------------------------------------- TDP keep-alive loop ---
+    def _start_keepalive(self) -> None:
+        """(Re)start the periodic re-apply so Armoury Crate can't override TDP."""
+        if self._keepalive_job is not None:
+            try:
+                self.after_cancel(self._keepalive_job)
+            except Exception:
+                pass
+            self._keepalive_job = None
+        if not self.config_data.get("tdp_keepalive", True) or self._active is None:
+            return
+        secs = max(2, int(self.config_data.get("tdp_keepalive_seconds", 5)))
+        self._keepalive_job = self.after(secs * 1000, self._keepalive_tick)
+
+    def _keepalive_tick(self) -> None:
+        self._keepalive_job = None
+        if not self.config_data.get("tdp_keepalive", True) or self._active is None:
+            return
+        _game, profile = self._active
+        # Silently re-apply; don't disturb the UI or recurse into keep-alive setup.
+        eff = self._effective_profile(profile)
+        try:
+            ryzenadj.apply_profile(eff, self.config_data)
+        except Exception:
+            pass
+        secs = max(2, int(self.config_data.get("tdp_keepalive_seconds", 5)))
+        self._keepalive_job = self.after(secs * 1000, self._keepalive_tick)
+
+    def _stop_keepalive(self) -> None:
+        self._active = None
+        if self._keepalive_job is not None:
+            try:
+                self.after_cancel(self._keepalive_job)
+            except Exception:
+                pass
+            self._keepalive_job = None
+
+    def _reapply_on_launch(self) -> None:
+        """Restore the last-applied profile at startup (TDP resets on reboot)."""
+        if self.config_data.get("reapply_on_launch", True):
+            self.reapply_last()
+
     def _on_reset(self) -> None:
+        self._stop_keepalive()
         result = ryzenadj.reset(self.config_data)
         if result.ok:
-            self.applied_var.set("Reset to default power limit.")
+            self.applied_var.set("Reset to default power limit (keep-alive stopped).")
         elif result.dry_run:
             messagebox.showinfo("Dry-run", f"{result.message}\n\n{' '.join(result.command)}")
         else:
@@ -1131,8 +1210,9 @@ class AllyOptimizerApp(ctk.CTk):
             cfg.save_config(self.config_data)
             messagebox.showinfo("RyzenAdj", f"RyzenAdj path set to:\n{path}")
 
-    def _open_edit_form(self, name: Optional[str] = None) -> None:
-        EditGameDialog(self, name)
+    def _open_edit_form(self, name: Optional[str] = None,
+                        profile_index: Optional[int] = 0) -> None:
+        EditGameDialog(self, name, profile_index)
 
     def _open_review(self) -> None:
         if not self.review:
@@ -1187,6 +1267,11 @@ class AllyOptimizerApp(ctk.CTk):
                          "Detect games from Desktop shortcuts when scanning")
         self._toggle_row(card, "scan_include_generic",
                          "Deep scan: include Start-menu + all installed programs (noisy)")
+        self._toggle_row(card, "tdp_keepalive",
+                         "Keep TDP applied (re-apply periodically — Armoury Crate "
+                         "overrides it otherwise)")
+        self._toggle_row(card, "reapply_on_launch",
+                         "Re-apply the last profile when the app starts")
         self._toggle_row(card, "enable_hotkey", "Global hotkey to reapply last profile")
         self._toggle_row(card, "minimize_to_tray", "Minimise to system tray on close")
         self.gamepad_switch = ctk.CTkSwitch(
@@ -1235,6 +1320,34 @@ class AllyOptimizerApp(ctk.CTk):
                           command=self._relaunch_admin, fg_color=ACCENT,
                           hover_color=ACCENT_HOVER, text_color="white").pack(side="left")
 
+        # --- Power defaults & display ---
+        card5 = self._card(scroller)
+        card5.pack(fill="x", pady=6)
+        ctk.CTkLabel(card5, text="Power defaults & display",
+                     font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=12, pady=(10, 4))
+        self._tdp_vars = {}
+        for key, label in (("min_tdp", "Min TDP (W)"), ("max_tdp", "Max TDP (W)"),
+                           ("battery_default_tdp", "Battery default (W)"),
+                           ("plugged_default_tdp", "Plugged default (W)")):
+            r = ctk.CTkFrame(card5, fg_color="transparent")
+            r.pack(anchor="w", padx=12, pady=2)
+            ctk.CTkLabel(r, text=label, width=160, anchor="w").pack(side="left")
+            var = ctk.StringVar(value=str(self.config_data.get(key)))
+            ctk.CTkEntry(r, textvariable=var, width=70).pack(side="left")
+            self._tdp_vars[key] = var
+        srow = ctk.CTkFrame(card5, fg_color="transparent")
+        srow.pack(anchor="w", padx=12, pady=(4, 4))
+        ctk.CTkLabel(srow, text="UI scale", width=160, anchor="w").pack(side="left")
+        self.scale_var = ctk.StringVar(
+            value=f"{int(float(self.config_data.get('ui_scale', 1.0)) * 100)}%")
+        ctk.CTkOptionMenu(srow, variable=self.scale_var,
+                          values=["90%", "100%", "110%", "125%", "150%"],
+                          width=90, fg_color=ACCENT, button_color=ACCENT_HOVER,
+                          button_hover_color=ACCENT_HOVER,
+                          command=self._set_ui_scale).pack(side="left")
+        self._accent_button(card5, "Save power defaults", self._save_tdp_defaults,
+                            width=160).pack(anchor="w", padx=12, pady=(6, 12))
+
         # --- Backup / safety ---
         card3 = self._card(scroller)
         card3.pack(fill="x", pady=6)
@@ -1256,8 +1369,48 @@ class AllyOptimizerApp(ctk.CTk):
         card4.pack(fill="x", pady=6)
         ctk.CTkLabel(card4, text=f"Ally Optimizer v{__version__}",
                      font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=12, pady=(10, 2))
-        self._accent_button(card4, "Check for updates", self._check_updates,
-                            width=150).pack(anchor="w", padx=12, pady=(0, 12))
+        arow2 = ctk.CTkFrame(card4, fg_color="transparent")
+        arow2.pack(anchor="w", padx=12, pady=(0, 12))
+        self._accent_button(arow2, "Check for updates", self._check_updates,
+                            width=150).pack(side="left")
+        ctk.CTkButton(arow2, text="Open log", command=self._open_log, width=110,
+                      fg_color=("gray75", "gray30"), hover_color=("gray65", "gray38"),
+                      text_color=("gray10", "gray90")).pack(side="left", padx=8)
+
+    def _save_tdp_defaults(self) -> None:
+        try:
+            vals = {k: int(float(v.get())) for k, v in self._tdp_vars.items()}
+        except ValueError:
+            messagebox.showerror("Invalid", "TDP values must be whole numbers.")
+            return
+        if vals["min_tdp"] >= vals["max_tdp"]:
+            messagebox.showerror("Invalid", "Min TDP must be below Max TDP.")
+            return
+        self.config_data.update(vals)
+        cfg.save_config(self.config_data)
+        messagebox.showinfo("Saved", "Power defaults updated.")
+
+    def _set_ui_scale(self, choice: str) -> None:
+        scale = int(choice.rstrip("%")) / 100.0
+        self.config_data["ui_scale"] = scale
+        cfg.save_config(self.config_data)
+        try:
+            ctk.set_widget_scaling(scale)
+        except Exception:
+            pass
+
+    def _open_log(self) -> None:
+        from .applog import LOG_FILE
+        if not os.path.isfile(LOG_FILE):
+            messagebox.showinfo("Log", "No log file yet.")
+            return
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(LOG_FILE)  # type: ignore[attr-defined]
+            else:
+                weblinks.open_link("file://" + LOG_FILE)
+        except Exception as exc:
+            messagebox.showinfo("Log", f"Log file:\n{LOG_FILE}\n\n{exc}")
 
     def _toggle_row(self, parent, key: str, label: str) -> None:
         sw = ctk.CTkSwitch(parent, text=label, progress_color=ACCENT,
@@ -1269,6 +1422,17 @@ class AllyOptimizerApp(ctk.CTk):
     def _set_config_flag(self, key: str, value) -> None:
         self.config_data[key] = bool(value)
         cfg.save_config(self.config_data)
+        if key == "tdp_keepalive":
+            self._start_keepalive() if value else self._stop_keepalive_loop_only()
+
+    def _stop_keepalive_loop_only(self) -> None:
+        """Stop the periodic re-apply but keep the active profile remembered."""
+        if self._keepalive_job is not None:
+            try:
+                self.after_cancel(self._keepalive_job)
+            except Exception:
+                pass
+            self._keepalive_job = None
 
     def _set_device_override(self, choice: str) -> None:
         self.config_data["device_override"] = None if choice == "Auto-detect" else choice
@@ -1333,12 +1497,40 @@ class AllyOptimizerApp(ctk.CTk):
         if info is None:
             messagebox.showinfo("Updates", "Couldn't reach GitHub to check for updates.")
         elif info.update_available:
-            if messagebox.askyesno("Update available",
-                                   f"v{info.latest} is available (you have v{info.current}).\n\n"
-                                   "Open the releases page?"):
-                weblinks.open_link(info.url)
+            if info.asset_url and messagebox.askyesno(
+                    "Update available",
+                    f"v{info.latest} is available (you have v{info.current}).\n\n"
+                    "Download it now? (Saves the new zip to your Downloads — "
+                    "unzip it over your current copy to update.)"):
+                self._download_update(info)
+            elif not info.asset_url:
+                if messagebox.askyesno("Update available",
+                                       f"v{info.latest} is available (you have "
+                                       f"v{info.current}).\n\nOpen the releases page?"):
+                    weblinks.open_link(info.url)
         else:
             messagebox.showinfo("Updates", f"You're on the latest version (v{info.current}).")
+
+    def _download_update(self, info) -> None:
+        dest_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        self.configure(cursor="watch")
+        self.update_idletasks()
+        try:
+            path = updates.download_update(info, dest_dir)
+        finally:
+            self.configure(cursor="")
+        if not path:
+            messagebox.showerror("Update", "Download failed. Opening the releases page.")
+            weblinks.open_link(info.url)
+            return
+        messagebox.showinfo("Downloaded",
+                            f"Saved to:\n{path}\n\nClose the app, unzip it over your "
+                            "current folder, and relaunch.")
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(os.path.dirname(path))  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     # ----------------------------------------------- auto-apply / onboarding -
     def _setup_watcher(self) -> None:
@@ -1474,12 +1666,22 @@ class AllyOptimizerApp(ctk.CTk):
     def _setup_tray(self) -> None:
         if not self.config_data.get("minimize_to_tray", True):
             return
+        preset_labels = [p["label"] for p in presets.presets_for(self.device.model)]
         self.tray = TrayIcon(APP_NAME,
                              on_show=lambda: self.after(0, self._restore),
                              on_reapply=lambda: self.after(0, self.reapply_last),
-                             on_quit=lambda: self.after(0, self._quit))
+                             on_quit=lambda: self.after(0, self._quit),
+                             presets=preset_labels,
+                             on_preset=lambda lb: self.after(0, lambda: self._apply_tray_preset(lb)))
         if not self.tray.start():
             self.tray = None
+
+    def _apply_tray_preset(self, label: str) -> None:
+        """Apply a power preset from the tray menu (system-wide, no game)."""
+        for p in presets.presets_for(self.device.model):
+            if p["label"] == label:
+                self._apply("Tray preset", p, announce=False)
+                return
 
     def _restore(self) -> None:
         self.deiconify()
@@ -1497,6 +1699,7 @@ class AllyOptimizerApp(ctk.CTk):
             self.tray.stop()
         self.watcher.stop()
         self.pad.stop()
+        self._stop_keepalive()
         self.destroy()
 
 
@@ -1618,15 +1821,22 @@ class WelcomeDialog(ctk.CTkToplevel):
 class EditGameDialog(ctk.CTkToplevel):
     """Add/Edit a game and one profile. Writes back to games.json."""
 
-    def __init__(self, app: AllyOptimizerApp, name: Optional[str]) -> None:
+    def __init__(self, app: AllyOptimizerApp, name: Optional[str],
+                 profile_index: Optional[int] = 0) -> None:
         super().__init__(app)
         self.app = app
-        self.title("Edit game" if name else "Add game")
-        self.geometry("460x740")
-        self.transient(app)
         existing = prof.find_game(app.games_doc, name) if name else None
-        first = (existing or {}).get("profiles", [{}])
-        first = first[0] if first else {}
+        profiles = (existing or {}).get("profiles", [])
+        # profile_index: int = edit that profile; None = add a new one.
+        self.profile_index = profile_index
+        if profile_index is None or profile_index >= len(profiles):
+            first = {}
+            self.title("Add profile" if existing else "Add game")
+        else:
+            first = profiles[profile_index] if profiles else {}
+            self.title("Edit profile" if existing else "Edit game")
+        self.geometry("460x760")
+        self.transient(app)
         self.imported_cover: Optional[str] = None
         self._tdp_max = app.device.tdp_profile["max"] + 5
 
@@ -1759,16 +1969,19 @@ class EditGameDialog(ctk.CTkToplevel):
             "notes": "",
         }
         existing = prof.find_game(self.app.games_doc, name)
-        if existing and existing.get("profiles"):
-            profiles = list(existing["profiles"])
-            profiles[0] = profile
-            profile["notes"] = existing["profiles"][0].get("notes", "")
-            source = existing.get("source", "manual entry")
+        existing_profiles = list((existing or {}).get("profiles", []))
+        if self.profile_index is not None and self.profile_index < len(existing_profiles):
+            # Editing an existing profile — preserve its notes if unchanged.
+            profile["notes"] = existing_profiles[self.profile_index].get("notes", "")
+            existing_profiles[self.profile_index] = profile
+            profiles = existing_profiles
+        elif existing_profiles:
+            profiles = existing_profiles + [profile]   # add another profile
         else:
             profiles = [profile]
-            source = "manual entry"
-        prof.upsert_game(self.app.games_doc, name,
-                         self.vars["process_name"].get().strip(), profiles, source=source,
+        source = (existing or {}).get("source", "manual entry")
+        proc = self.vars["process_name"].get().strip() or (existing or {}).get("process_name", "")
+        prof.upsert_game(self.app.games_doc, name, proc, profiles, source=source,
                          cover=self.imported_cover)
         prof.save_games(self.app.games_doc)
         self.app.selected_game = name

@@ -2,6 +2,22 @@
 
 All notable changes to Ally Optimizer. Dates are when the release was cut.
 
+## v1.10.0 — reliability + power-user features
+- **TDP keep-alive:** the app now re-applies your profile every few seconds so
+  Armoury Crate / the ASUS service can't silently override it (toggle + interval
+  in Settings). This is the fix if TDP changes seemed to "not stick".
+- **Re-apply on launch:** your last profile is restored when the app starts
+  (TDP resets on reboot). Toggle in Settings.
+- **Multiple profiles per game:** add, edit and delete several profiles per game
+  from the detail view (not just one).
+- **Logging:** a rolling `profiles/allyoptimizer.log` records scans, applies and
+  errors; open it from Settings → Open log.
+- **Settings:** editable Min/Max TDP and battery/plugged defaults, and a **UI
+  scale** option for the small screen.
+- **Tray quick-switch:** apply a power preset straight from the system-tray menu.
+- **Update download:** the update check can now download the new build for you,
+  not just open the page.
+
 ## v1.9.1
 - **Kept games stick:** anything you Keep in Review (or add manually) is
   remembered as a known game and is never sent back to Review on later scans.

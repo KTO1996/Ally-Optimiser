@@ -119,6 +119,9 @@ def _failure_hint(exe: str) -> str:
 
 
 def _run(cmd: List[str]) -> ApplyResult:
+    from .applog import get_logger
+    log = get_logger()
+    log.info("RyzenAdj: %s", " ".join(cmd))
     try:
         proc = winproc.run(
             cmd,
@@ -127,15 +130,19 @@ def _run(cmd: List[str]) -> ApplyResult:
             timeout=30,
         )
     except FileNotFoundError:
+        log.error("RyzenAdj executable not found: %s", cmd[0])
         return ApplyResult(False, cmd, "RyzenAdj executable not found.")
     except subprocess.TimeoutExpired:
+        log.error("RyzenAdj timed out")
         return ApplyResult(False, cmd, "RyzenAdj timed out.")
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()
+        log.error("RyzenAdj failed (exit %s): %s", proc.returncode, detail)
         msg = f"RyzenAdj failed (exit {proc.returncode})."
         if detail:
             msg += f"\n{detail}"
         return ApplyResult(False, cmd, msg + _failure_hint(cmd[0]))
+    log.info("RyzenAdj OK")
     return ApplyResult(True, cmd, (proc.stdout or "Applied.").strip())
 
 

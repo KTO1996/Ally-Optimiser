@@ -42,6 +42,10 @@ DEFAULTS: Dict[str, Any] = {
     "game_folders": [],               # extra folders to scan for non-launcher games
     "ignored_games": [],              # names rejected in review — never re-added
     "known_games": [],                # names confirmed as games — never re-reviewed
+    "tdp_keepalive": True,            # re-apply TDP periodically (Armoury Crate overrides it)
+    "tdp_keepalive_seconds": 5,       # how often to re-apply
+    "reapply_on_launch": True,        # re-apply the last profile when the app starts
+    "ui_scale": 1.0,                  # widget scaling for the small screen
     # Safety clamps (watts) sent to RyzenAdj. The Z2/Z2 Extreme is comfortable
     # in roughly this band; clamp keeps a bad profile from doing harm.
     "min_tdp": 5,

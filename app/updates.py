@@ -23,6 +23,8 @@ class UpdateInfo:
     latest: str
     url: str
     update_available: bool
+    asset_url: str = ""      # browser_download_url of the windows zip, if present
+    asset_name: str = ""
 
 
 def _parse(v: str) -> Tuple[int, ...]:
@@ -51,5 +53,31 @@ def check_for_update(current_version: str, timeout: int = 8) -> Optional[UpdateI
     if not latest:
         return None
     url = data.get("html_url") or RELEASES_PAGE
+    asset_url = asset_name = ""
+    for asset in data.get("assets") or []:
+        nm = asset.get("name", "")
+        if nm.lower().endswith(".zip"):
+            asset_url = asset.get("browser_download_url", "")
+            asset_name = nm
+            break
     return UpdateInfo(current=current_version, latest=latest, url=url,
-                      update_available=is_newer(latest, current_version))
+                      update_available=is_newer(latest, current_version),
+                      asset_url=asset_url, asset_name=asset_name)
+
+
+def download_update(info: "UpdateInfo", dest_dir: str, timeout: int = 120) -> Optional[str]:
+    """Download the release zip into ``dest_dir``; return the saved path or None."""
+    if not info.asset_url:
+        return None
+    try:
+        import os
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, info.asset_name or "AllyOptimizer-windows.zip")
+        req = urllib.request.Request(info.asset_url, headers=_UA)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = resp.read()
+        with open(dest, "wb") as fh:
+            fh.write(data)
+        return dest
+    except Exception:
+        return None
